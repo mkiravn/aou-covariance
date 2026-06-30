@@ -1,0 +1,42 @@
+# Genomic data files — never commit these
+*.bed
+*.bim
+*.fam
+*.vcf
+*.vcf.gz
+*.pgen
+*.pvar
+*.psam
+*.bgen
+*.mt/
+*.ht/
+*.bm/
+
+# PLINK output
+*.log
+*.prune.in
+*.prune.out
+*.eigenvec
+*.eigenval
+*.acount
+*.grm.bin
+*.grm.N.bin
+*.grm.id
+
+# Large results files
+*.tsv
+*.txt
+!data/reference/*.panel   # keep the small reference files
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+
+# Mac
+.DS_Store
+
+# Temporary
+*.tmp
+*.gstmp
