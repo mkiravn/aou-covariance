@@ -23,10 +23,22 @@
 *.grm.N.bin
 *.grm.id
 
-# Large results files
+# Large results / tabular data files -- these are the shape real
+# participant-level extracts come in, so default to blocking them
 *.tsv
 *.txt
-!data/reference/*.panel   # keep the small reference files
+*.csv
+*.parquet
+*.feather
+*.rds
+*.rdata
+*.RData
+!data/reference/*.panel   # keep the small reference files (public panels only)
+
+# ID / keep-remove lists -- only ever force-add these for PUBLIC reference
+# panel IDs (e.g. 1000 Genomes), never for anything derived from an AoU cohort
+*.keep
+*.remove
 
 # Python
 __pycache__/
