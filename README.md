@@ -51,9 +51,38 @@ substitute for checking before `git add`.
 
 ## Layout convention
 
-Each numbered stage gets a `docs/` (parameters, validation results) and
+Each numbered stage gets a `docs/` (parameters, validation results),
 `scripts/` (`local/` for anything prototyped outside the workbench, `aou/`
-for what actually runs there) once there's something real to put in them.
+for what actually runs there), and `notebooks/` (`local/` vs `remote/`,
+same split) once there's something real to put in them.
+
+### Where data actually lives
+
+This repo is code only (see Data handling above) — everything the code
+reads or writes lives in the workspace bucket, one folder per stage,
+mirroring the repo layout 1:1. Everything on the workbench is already
+access-controlled, so there's no split by sensitivity — egress review
+happens once, at the point something actually leaves the workbench, not
+at the folder level.
+
+```
+$WORKSPACE_BUCKET/data/
+├── 01_ancestry_filtering/
+│   ├── 1000g_hm3/      # merged whole-genome bfile + HM3 snplist
+│   └── round1_pca/     # PCA loadings/scores
+├── 02_phenotype/
+├── 03_grm_shards/
+└── 04_process_shards/
+```
+
+Bucket paths under `data/<stage>/` are the source of truth. Where possible,
+tools read and write there directly instead of staging through local disk —
+notebooks mount the bucket with `gcsfuse` so plink/GCTA can treat
+`$WORKSPACE_BUCKET/data/...` as an ordinary local path. Fall back to plain
+local disk + explicit `gsutil cp`/`rsync` only for tools that genuinely need
+low-level filesystem access `gcsfuse` doesn't support well (heavy random
+I/O); local disk is ephemeral either way and disappears if the environment
+is deleted.
 
 ## GRM-pairs submodule
 
