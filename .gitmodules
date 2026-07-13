@@ -1,0 +1,3 @@
+[submodule "GRM-pairs"]
+	path = GRM-pairs
+	url = https://github.com/mkiravn/GRM-pairs.git
