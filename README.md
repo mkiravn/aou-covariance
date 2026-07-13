@@ -37,9 +37,10 @@ cd GRM-pairs/grm_bin_sharded && make   # build grm_shard_tool for whatever archi
 
 Pinned to whatever commit `git submodule status` shows — bump with
 `git submodule update --remote GRM-pairs` and commit the pointer change.
-Note: as of this writing, [GRM-pairs#16](https://github.com/mkiravn/GRM-pairs/pull/16)
-(untracking two accidentally-committed compiled binaries) is still open;
-worth merging before pinning a "clean" submodule reference here.
+[GRM-pairs#16](https://github.com/mkiravn/GRM-pairs/pull/16) and
+[#17](https://github.com/mkiravn/GRM-pairs/pull/17) (untracking every
+accidentally-committed compiled binary in that repo) are both merged, so
+the pin here is clean.
 
 ## Covariate decisions so far
 
