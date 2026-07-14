@@ -128,6 +128,8 @@ pull_phenotype <- function(row, keep_ids) {
   ", REFERENCE_DATE, row$concept_id)
 
   aou_sql(query) %>%
+    collect() %>%   # pull out of BigQuery before any local joins/filters -- a
+                     # lazy remote tbl can't be left_join()'d against a local one
     mutate(person_id = as.character(person_id)) %>%
     filter(person_id %in% keep_ids)
 }
