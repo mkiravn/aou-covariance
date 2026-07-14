@@ -13,7 +13,13 @@ phenotype exports one `FID IID Y` file (matching
 - covariate-set (base = sex-at-birth + age; PCs / 3-digit zip factor / SES
   vars each independently toggled on top)
 
-The residualization/transform/export/diagnostics logic is real and runnable.
+The residualization/transform/export/diagnostics logic lives in
+`scripts/local/residualize_lib.R`, shared between the real notebook and
+`notebooks/local/test_residualize_fake_data.ipynb` — a synthetic-data smoke
+test (fake IDs, fake phenotypes, fake PCs, no AoU access needed) that
+exercises the full pipeline end to end. Run that first if changing
+anything in the lib.
+
 **Not yet filled in**, needs the real workbench to pin down:
 - the actual BigQuery pulls per phenotype source (`measurement` / `survey`
   / `condition`)
