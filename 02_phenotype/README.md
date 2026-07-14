@@ -20,6 +20,16 @@ test (fake IDs, fake phenotypes, fake PCs, no AoU access needed) that
 exercises the full pipeline end to end. Run that first if changing
 anything in the lib.
 
+`docs/phenotype_list.tsv`: a starter real phenotype list, anthropometric +
+metabolic panel (height, weight, BMI, systolic/diastolic BP, glucose,
+HbA1c, HDL/LDL cholesterol, triglycerides), OMOP concept_ids looked up
+against public AoU/OHDSI documentation. 7 of 10 concept_ids are confirmed;
+the 3 lipid values have a real LOINC code but an unverified concept_id
+(marked `UNCONFIRMED` in the `concept_id` column) — check the AoU Data
+Browser for the exact concept_id before running those. These are all
+public, standard vocabulary identifiers describing *which* concepts to
+pull — not participant data, fine to have in git.
+
 **Not yet filled in**, needs the real workbench to pin down:
 - the actual BigQuery pulls per phenotype source (`measurement` / `survey`
   / `condition`)
