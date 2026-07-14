@@ -73,7 +73,10 @@ dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 `keep_ids`: everyone downstream gets restricted to this set before anything else -- residualization, transforms, and diagnostics are all computed within this cohort only, not the full AoU population.
 
 ```{r read-lists}
-keep_ids <- read_lines(KEEP_LIST_PATH)
+keep_ids_raw <- read_lines(KEEP_LIST_PATH)
+# round 2's keep-list is plink-style: either one ID per line, or "FID IID"
+# space-separated -- take the last whitespace-separated field either way
+keep_ids <- str_trim(keep_ids_raw) %>% str_split(" +") %>% sapply(function(x) tail(x, 1))
 
 pheno_list <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
 stopifnot(all(c("phenotype_name", "source", "concept_id") %in% names(pheno_list)))
