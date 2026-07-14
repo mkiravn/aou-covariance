@@ -34,12 +34,25 @@ pull — not participant data, fine to have in git.
 
 `pull_phenotype()` is implemented for `source == "measurement"` via the
 `allofus` package (`aou_connect()` + `aou_sql()`), most recent value per
-person, joined to sex-at-birth and age from `person`. Age is computed from
-a single fixed `REFERENCE_DATE` (set per run) rather than at each
+person, joined to age from `person` and sex from `person.
+sex_at_birth_concept_id` — a direct AoU-specific column, distinct from
+`person.gender_concept_id` (gender identity). Age is computed from a
+single fixed `REFERENCE_DATE` (set per run) rather than at each
 phenotype's own measurement time — simpler, and matches validated
 real-world usage.
 
+`pull_covariates()`'s zip3/SES join is implemented against
+`zip3_ses_map`: 3-digit zip comes from a masked (privacy-protected)
+`observation` row (marked with a `*` in `value_as_string`), joined on
+zip3 to get `median_income`, `poverty`, `deprivation_index`.
+
+Raw `pull_phenotype()` output is cached per phenotype under
+`RAW_PHENO_CACHE_DIR` (one TSV per phenotype), so re-running the notebook
+while iterating on `residualize_lib.R` doesn't re-hit BigQuery — delete a
+phenotype's cache file to force a refresh. Any covariate-set combo whose
+covariates are entirely `NA` for a given phenotype is skipped rather than
+crashing the whole run; check `combo_summary_table$status` for which
+combos actually ran.
+
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
-- `zip3_ses_map`'s join path (likely via `observation`, not directly on
-  `person`)

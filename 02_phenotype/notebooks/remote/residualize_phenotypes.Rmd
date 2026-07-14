@@ -64,8 +64,11 @@ PHENO_LIST_PATH <- "../../docs/phenotype_list.tsv"  # starter anthropometric/met
 PC_PATH <- "PLACEHOLDER"          # round 1 .eigenvec (or AoU-projected .sscore)
 OUT_DIR <- "PLACEHOLDER"          # where the FID/IID/Y files get written
 REFERENCE_DATE <- "PLACEHOLDER"   # e.g. "2024-01-01" -- single fixed date age is computed from for every phenotype, not per-measurement
+RAW_PHENO_CACHE_DIR <- "PLACEHOLDER"  # raw pull_phenotype() output per phenotype, cached so repeated
+                                       # runs while iterating on residualize_lib.R don't re-hit BigQuery
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(RAW_PHENO_CACHE_DIR, recursive = TRUE, showWarnings = FALSE)
 ```
 
 ## Read the ID list and phenotype list
@@ -73,7 +76,10 @@ dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 `keep_ids`: everyone downstream gets restricted to this set before anything else -- residualization, transforms, and diagnostics are all computed within this cohort only, not the full AoU population.
 
 ```{r read-lists}
-keep_ids <- read_lines(KEEP_LIST_PATH)
+keep_ids_raw <- read_lines(KEEP_LIST_PATH)
+# round 2's keep-list is plink-style: either one ID per line, or "FID IID"
+# space-separated -- take the last whitespace-separated field either way
+keep_ids <- str_trim(keep_ids_raw) %>% str_split(" +") %>% sapply(function(x) tail(x, 1))
 
 pheno_list <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
 stopifnot(all(c("phenotype_name", "source", "concept_id") %in% names(pheno_list)))
@@ -82,17 +88,17 @@ pheno_list
 
 ## Pull phenotype + covariate table
 
-`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, sex/age from `person`, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). `survey`/`condition` sources aren't wired up yet -- add branches when a phenotype needs them.
-
-**Still unresolved, needs the real workbench to pin down:**
-
-- `zip3_ses_map` join path
-- exact gender_concept_id set (45878463/45880669 cover Female/Male; anything else falls into `"Other"` -- confirm that's still exhaustive against the current CDR version)
+`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey`/`condition` phenotype sources aren't wired up yet -- add branches when a phenotype needs them.
 
 Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
 
 ```{r pull-functions}
 pull_phenotype <- function(row, keep_ids) {
+  cache_path <- file.path(RAW_PHENO_CACHE_DIR, paste0(row$phenotype_name, ".tsv"))
+  if (file.exists(cache_path)) {
+    return(read_tsv(cache_path, col_types = cols(person_id = "c", phenotype = "d", age = "d", sex_at_birth = "c")))
+  }
+
   if (row$source != "measurement") {
     stop(sprintf(
       "pull_phenotype(): source '%s' not implemented -- only 'measurement' is wired up so far",
@@ -106,8 +112,8 @@ pull_phenotype <- function(row, keep_ids) {
         person_id,
         DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS age,
         CASE
-          WHEN gender_concept_id = 45878463 THEN 'Female'
-          WHEN gender_concept_id = 45880669 THEN 'Male'
+          WHEN sex_at_birth_concept_id = 45878463 THEN 'Female'
+          WHEN sex_at_birth_concept_id = 45880669 THEN 'Male'
           ELSE 'Other'
         END AS sex_at_birth
       FROM {CDR}.person
@@ -127,9 +133,15 @@ pull_phenotype <- function(row, keep_ids) {
     WHERE m.rn = 1
   ", REFERENCE_DATE, row$concept_id)
 
-  aou_sql(query) %>%
+  pheno_df <- aou_sql(query) %>%
+    collect() %>%   # pull out of BigQuery before any local joins/filters -- a
+                     # lazy remote tbl can't be left_join()'d against a local one
     mutate(person_id = as.character(person_id)) %>%
     filter(person_id %in% keep_ids)
+
+  write_tsv(pheno_df, cache_path)   # cache the raw pull -- avoids re-hitting BigQuery on every
+                                     # downstream iteration; delete the file to force a refresh
+  pheno_df
 }
 
 pull_covariates <- function(keep_ids) {
@@ -137,8 +149,30 @@ pull_covariates <- function(keep_ids) {
     rename(person_id = IID) %>%
     filter(person_id %in% keep_ids)
 
-  zip3 <- tibble(person_id = character(), zip3 = character())        # TODO: real join
-  ses <- tibble(person_id = character(), median_income = double())    # TODO: real join
+  # zip3 comes from a masked (privacy-protected) zip-code observation --
+  # AoU marks these rows with a "*" in value_as_string; the first 3 characters
+  # are the 3-digit zip prefix, joined against the CDR-provided zip3_ses_map
+  zip3_ses_query <- "
+    SELECT
+      o.person_id,
+      z.zip3,
+      z.median_income,
+      z.fraction_poverty AS poverty,
+      z.deprivation_index
+    FROM (
+      SELECT person_id, CAST(SUBSTR(value_as_string, 1, 3) AS INT64) AS zip3
+      FROM {CDR}.observation
+      WHERE STRPOS(value_as_string, '*') > 0
+    ) o
+    INNER JOIN {CDR}.zip3_ses_map z ON o.zip3 = z.zip3
+  "
+  zip3_ses <- aou_sql(zip3_ses_query) %>%
+    collect() %>%
+    mutate(person_id = as.character(person_id)) %>%
+    filter(person_id %in% keep_ids)
+
+  zip3 <- zip3_ses %>% transmute(person_id, zip3 = as.character(zip3))
+  ses <- zip3_ses %>% select(person_id, median_income, poverty, deprivation_index)
 
   list(pcs = pcs, zip3 = zip3, ses = ses)
 }
