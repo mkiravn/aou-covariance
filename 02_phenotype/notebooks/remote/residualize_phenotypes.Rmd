@@ -1,0 +1,142 @@
+---
+title: "Phenotype residualization"
+output: html_document
+---
+
+Input: round 2's ancestry-filtered keep-list (person IDs) and a phenotype list TSV. Output: one `FID IID Y` file per phenotype x transform x covariate-set combination, matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format.
+
+Protocol (order matters, see Kemper et al. 2021 Methods):
+
+1. residualize `phenotype ~ covariates`
+2. trim residuals > 5 SD from the mean
+3. standardize surviving residuals to mean 0, var 1, within each sex
+
+Covariates: sex-at-birth + age always included. PCs / zip3 (factor) / SES vars (`zip3_ses_map`) are each independently toggleable -- every combination gets run, not just one chosen set.
+
+## Setup
+
+**Run this chunk first in a freshly restarted R session.** If a package (e.g. `rlang`) already got auto-loaded from the system library before this chunk runs -- which can happen just from session startup -- `.libPaths()` can't retroactively swap it for the newer version installed here; R won't unload/replace an already-attached namespace mid-session. Symptom: `namespace 'rlang' 1.1.6 is already loaded, but >= 1.1.7 is required`. Fix is a full session restart (Session > Restart R in RStudio), not re-running chunks in the same session.
+
+```{r setup}
+# R_LIBS_USER is set on this environment, but to a colon-separated list of
+# non-writable system paths (conda + spark), not a single writable directory --
+# install.packages(lib=...) needs one directory, so don't trust R_LIBS_USER here.
+# Always use an explicit personal library instead.
+user_lib <- file.path(Sys.getenv("HOME"), "R", "library")
+dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+.libPaths(c(user_lib, .libPaths()))
+
+required_pkgs <- c("dplyr", "tidyr", "readr", "stringr", "e1071", "bigrquery")
+missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs, lib = user_lib)
+
+library(dplyr)
+library(tidyr)
+library(readr)
+library(stringr)
+library(bigrquery)
+source("../../scripts/local/residualize_lib.R")   # transform, residualize, export -- shared with the fake-data test
+```
+
+## Inputs
+
+- `KEEP_LIST_PATH`: round 2 output -- person IDs passing ancestry filtering.
+- `PHENO_LIST_PATH`: TSV describing which phenotypes to pull (see schema below).
+- `PC_PATH`: round 1's PCA output (`.eigenvec`), or round 1's AoU-projected `.sscore` once that step is done.
+- `ZIP3_SES_TABLE`: AoU's `zip3_ses_map` -- exact join path (likely via `observation`, not directly on `person`) still needs confirming against the real workbench, flagged below.
+
+Phenotype list TSV schema (`PHENO_LIST_PATH`):
+
+| column | purpose |
+|---|---|
+| `phenotype_name` | label used in output filenames/diagnostics |
+| `source` | `measurement` / `survey` / `condition` -- picks the extraction path |
+| `concept_id` | AoU concept ID (comma-separated for multiple) |
+| `value_field` | optional -- which field holds the numeric value |
+| `notes` | free text, not used programmatically |
+
+```{r inputs}
+KEEP_LIST_PATH <- "PLACEHOLDER"   # round 2 output, one person_id per line
+PHENO_LIST_PATH <- "../../docs/phenotype_list.tsv"  # starter anthropometric/metabolic panel -- see its header for concept_id confirmation status
+PC_PATH <- "PLACEHOLDER"          # round 1 .eigenvec (or AoU-projected .sscore)
+OUT_DIR <- "PLACEHOLDER"          # where the FID/IID/Y files get written
+
+dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+```
+
+## Read the ID list and phenotype list
+
+`keep_ids`: everyone downstream gets restricted to this set before anything else -- residualization, transforms, and diagnostics are all computed within this cohort only, not the full AoU population.
+
+```{r read-lists}
+keep_ids <- read_lines(KEEP_LIST_PATH)
+
+pheno_list <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
+stopifnot(all(c("phenotype_name", "source", "concept_id") %in% names(pheno_list)))
+pheno_list
+```
+
+## Pull phenotype + covariate table
+
+**Unresolved, needs the real workbench to pin down:**
+
+- exact BigQuery table/column names per `source` type (`measurement` vs `survey` vs `condition`)
+- `zip3_ses_map` join path
+- age definition -- age at the specific measurement/response (more correct, varies per phenotype) vs. a single fixed age pulled once. Written here as per-phenotype since that's the more defensible default; simplify later if it turns out not to matter.
+
+Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
+
+```{r pull-functions}
+pull_phenotype <- function(row, keep_ids) {
+  # TODO: real BigQuery query, branching on row$source ("measurement" / "survey" / "condition").
+  # Must return: person_id, phenotype (numeric), age (numeric, at the phenotype's own
+  # measurement/response time), sex_at_birth (factor) -- restricted to keep_ids.
+  stop("pull_phenotype() not implemented -- fill in against the real workbench")
+}
+
+pull_covariates <- function(keep_ids) {
+  pcs <- read_table(PC_PATH, col_types = cols(.default = "d", IID = "c")) %>%
+    rename(person_id = IID) %>%
+    filter(person_id %in% keep_ids)
+
+  zip3 <- tibble(person_id = character(), zip3 = character())        # TODO: real join
+  ses <- tibble(person_id = character(), median_income = double())    # TODO: real join
+
+  list(pcs = pcs, zip3 = zip3, ses = ses)
+}
+```
+
+## Optional skew-reducing transform
+
+Rank-based inverse-normal transform (`inverse_normal_transform()` in `residualize_lib.R`) -- chosen over log/Box-Cox since it doesn't assume a particular skew direction or require positive values, so it works uniformly across an arbitrary phenotype list without per-phenotype tuning. Both `raw` and `invnorm` variants get carried through the rest of the pipeline; skewness before/after is reported so it's clear whether the transform actually helped for each phenotype, rather than applying it blindly. See `02_phenotype/notebooks/local/test_residualize_fake_data.ipynb` (or its eventual `.Rmd` counterpart) for a worked example on synthetic data showing this diagnostic actually catching a real skew reduction.
+
+## Covariate-set configs
+
+`build_covariate_sets()` (in `residualize_lib.R`) returns a named list of formula RHS vectors. `sex_at_birth` is handled separately (it's the stratification variable for step 3, not a residualization covariate -- see `residualize_phenotype()` in the lib), so it's not in these formulas.
+
+```{r covariate-sets}
+pc_cols <- paste0("PC", 1:20)   # matches round 1's 20-PC output
+covariate_sets <- build_covariate_sets(pc_cols)
+names(covariate_sets)
+```
+
+## Main loop
+
+`run_residualization()` (in `residualize_lib.R`) runs the full cross product of {phenotype} x {raw, invnorm} x {covariate-set}, all exported -- no curation, every combination in `pheno_list` x `covariate_sets` gets written out as an `FID IID Y` file matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format.
+
+```{r main-loop}
+result <- run_residualization(
+  pheno_list, keep_ids, pull_phenotype, pull_covariates,
+  covariate_sets, OUT_DIR
+)
+```
+
+## Diagnostics summary
+
+```{r diagnostics-skew}
+result$skew_summary_table   # per phenotype: skewness before/after the invnorm transform
+```
+
+```{r diagnostics-combo}
+result$combo_summary_table  # per phenotype x variant x covariate-set: N retained, R^2
+```

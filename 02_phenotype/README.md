@@ -4,10 +4,12 @@ Download phenotypes/covariates from AoU, normalize (Kemper et al. 2021
 style: residualize → trim outliers → standardize within sex — see main
 README for background).
 
-`notebooks/remote/residualize_phenotypes.ipynb`: takes round 2's
-ancestry-filtered keep-list and a phenotype list TSV, and for every
-phenotype exports one `FID IID Y` file (matching
-`GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per combination of:
+`notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
+`residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
+your environment prefers): takes round 2's ancestry-filtered keep-list and
+a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
+(matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per
+combination of:
 
 - raw vs. rank-inverse-normal-transformed
 - covariate-set (base = sex-at-birth + age; PCs / 3-digit zip factor / SES
