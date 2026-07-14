@@ -41,6 +41,15 @@ field. Age is computed from a single fixed `REFERENCE_DATE` (set per run)
 rather than at each phenotype's own measurement time — simpler, and
 matches validated real-world usage.
 
+Raw `pull_phenotype()` output is cached per phenotype under
+`RAW_PHENO_CACHE_DIR` (one TSV per phenotype), so re-running the notebook
+while iterating on `residualize_lib.R` doesn't re-hit BigQuery — delete a
+phenotype's cache file to force a refresh. Any covariate-set combo whose
+covariates are entirely `NA` for a given phenotype (this happens now for
+every `zip3`/`ses` combo, since those pulls are still stubs) is skipped
+rather than crashing the whole run; check `combo_summary_table$status` for
+which combos actually ran.
+
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
 - `zip3_ses_map`'s join path (likely via `observation`, not directly on

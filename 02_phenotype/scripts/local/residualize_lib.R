@@ -102,16 +102,31 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
       variant_label <- ifelse(variant_col == "phenotype", "raw", "invnorm")
 
       for (covset_name in names(covariate_sets)) {
-        result <- residualize_phenotype(df, variant_col, "sex_at_birth", covariate_sets[[covset_name]])
-
+        covariate_cols <- covariate_sets[[covset_name]]
         out_name <- sprintf("%s__%s__%s", name, variant_label, covset_name)
+
+        # a covariate column that's entirely NA (e.g. zip3/ses not yet wired
+        # up in pull_covariates()) leaves lm() with 0 complete cases -- skip
+        # that combo instead of crashing the whole run
+        all_na_cols <- covariate_cols[sapply(covariate_cols, function(col) all(is.na(df[[col]])))]
+        if (length(all_na_cols) > 0) {
+          combo_diagnostics[[out_name]] <- tibble(
+            combo = out_name, phenotype = name, variant = variant_label,
+            covariate_set = covset_name,
+            n_input = nrow(df), n_retained = NA_integer_, r_squared = NA_real_,
+            status = sprintf("skipped: all-NA covariate(s) %s", paste(all_na_cols, collapse = ", "))
+          )
+          next
+        }
+
+        result <- residualize_phenotype(df, variant_col, "sex_at_birth", covariate_cols)
         write_grm_pheno(result$data, file.path(out_dir, paste0(out_name, ".pheno")))
 
         combo_diagnostics[[out_name]] <- tibble(
           combo = out_name, phenotype = name, variant = variant_label,
           covariate_set = covset_name,
           n_input = result$n_input, n_retained = result$n_retained,
-          r_squared = result$r_squared
+          r_squared = result$r_squared, status = "ok"
         )
       }
     }

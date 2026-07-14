@@ -64,8 +64,11 @@ PHENO_LIST_PATH <- "../../docs/phenotype_list.tsv"  # starter anthropometric/met
 PC_PATH <- "PLACEHOLDER"          # round 1 .eigenvec (or AoU-projected .sscore)
 OUT_DIR <- "PLACEHOLDER"          # where the FID/IID/Y files get written
 REFERENCE_DATE <- "PLACEHOLDER"   # e.g. "2024-01-01" -- single fixed date age is computed from for every phenotype, not per-measurement
+RAW_PHENO_CACHE_DIR <- "PLACEHOLDER"  # raw pull_phenotype() output per phenotype, cached so repeated
+                                       # runs while iterating on residualize_lib.R don't re-hit BigQuery
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(RAW_PHENO_CACHE_DIR, recursive = TRUE, showWarnings = FALSE)
 ```
 
 ## Read the ID list and phenotype list
@@ -95,6 +98,11 @@ Everything below this chunk (transform, covariate-set configs, residualization, 
 
 ```{r pull-functions}
 pull_phenotype <- function(row, keep_ids) {
+  cache_path <- file.path(RAW_PHENO_CACHE_DIR, paste0(row$phenotype_name, ".tsv"))
+  if (file.exists(cache_path)) {
+    return(read_tsv(cache_path, col_types = cols(person_id = "c", phenotype = "d", age = "d", sex_at_birth = "c")))
+  }
+
   if (row$source != "measurement") {
     stop(sprintf(
       "pull_phenotype(): source '%s' not implemented -- only 'measurement' is wired up so far",
@@ -138,11 +146,15 @@ pull_phenotype <- function(row, keep_ids) {
     WHERE m.rn = 1
   ", REFERENCE_DATE, row$concept_id)
 
-  aou_sql(query) %>%
+  pheno_df <- aou_sql(query) %>%
     collect() %>%   # pull out of BigQuery before any local joins/filters -- a
                      # lazy remote tbl can't be left_join()'d against a local one
     mutate(person_id = as.character(person_id)) %>%
     filter(person_id %in% keep_ids)
+
+  write_tsv(pheno_df, cache_path)   # cache the raw pull -- avoids re-hitting BigQuery on every
+                                     # downstream iteration; delete the file to force a refresh
+  pheno_df
 }
 
 pull_covariates <- function(keep_ids) {
