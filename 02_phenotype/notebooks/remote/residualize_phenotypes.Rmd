@@ -85,12 +85,11 @@ pheno_list
 
 ## Pull phenotype + covariate table
 
-`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, sex/age from `person`, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). `survey`/`condition` sources aren't wired up yet -- add branches when a phenotype needs them.
+`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is *sex assigned at birth* from the Basics survey (`observation` table, question concept `1585845`), not `person.gender_concept_id` (which is gender identity). `survey`/`condition` sources aren't wired up yet -- add branches when a phenotype needs them.
 
 **Still unresolved, needs the real workbench to pin down:**
 
 - `zip3_ses_map` join path
-- exact gender_concept_id set (45878463/45880669 cover Female/Male; anything else falls into `"Other"` -- confirm that's still exhaustive against the current CDR version)
 
 Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
 
@@ -104,16 +103,25 @@ pull_phenotype <- function(row, keep_ids) {
   }
 
   query <- sprintf("
-    WITH demographics AS (
+    WITH sex_at_birth AS (
       SELECT
         person_id,
-        DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS age,
+        value_as_concept_id,
+        ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY observation_date DESC) AS rn
+      FROM {CDR}.observation
+      WHERE observation_concept_id = 1585845   -- AoU Basics survey: 'Sex Assigned at Birth'
+    ),
+    demographics AS (
+      SELECT
+        p.person_id,
+        DATE_DIFF(DATE '%s', DATE(p.birth_datetime), YEAR) AS age,
         CASE
-          WHEN gender_concept_id = 45878463 THEN 'Female'
-          WHEN gender_concept_id = 45880669 THEN 'Male'
+          WHEN s.value_as_concept_id = 1585846 THEN 'Male'
+          WHEN s.value_as_concept_id = 1585847 THEN 'Female'
           ELSE 'Other'
         END AS sex_at_birth
-      FROM {CDR}.person
+      FROM {CDR}.person p
+      LEFT JOIN sex_at_birth s ON p.person_id = s.person_id AND s.rn = 1
     ),
     measurements AS (
       SELECT

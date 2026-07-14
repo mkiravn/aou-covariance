@@ -34,10 +34,12 @@ pull — not participant data, fine to have in git.
 
 `pull_phenotype()` is implemented for `source == "measurement"` via the
 `allofus` package (`aou_connect()` + `aou_sql()`), most recent value per
-person, joined to sex-at-birth and age from `person`. Age is computed from
-a single fixed `REFERENCE_DATE` (set per run) rather than at each
-phenotype's own measurement time — simpler, and matches validated
-real-world usage.
+person, joined to age from `person` and sex assigned at birth from the
+Basics survey (`observation` table, question concept `1585845`) — not
+`person.gender_concept_id`, which is gender identity, a separate AoU
+field. Age is computed from a single fixed `REFERENCE_DATE` (set per run)
+rather than at each phenotype's own measurement time — simpler, and
+matches validated real-world usage.
 
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
