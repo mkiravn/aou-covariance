@@ -88,11 +88,7 @@ pheno_list
 
 ## Pull phenotype + covariate table
 
-`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is *sex assigned at birth* from the Basics survey (`observation` table, question concept `1585845`), not `person.gender_concept_id` (which is gender identity). `survey`/`condition` sources aren't wired up yet -- add branches when a phenotype needs them.
-
-**Still unresolved, needs the real workbench to pin down:**
-
-- `zip3_ses_map` join path
+`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey`/`condition` phenotype sources aren't wired up yet -- add branches when a phenotype needs them.
 
 Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
 
@@ -111,25 +107,16 @@ pull_phenotype <- function(row, keep_ids) {
   }
 
   query <- sprintf("
-    WITH sex_at_birth AS (
+    WITH demographics AS (
       SELECT
         person_id,
-        value_as_concept_id,
-        ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY observation_date DESC) AS rn
-      FROM {CDR}.observation
-      WHERE observation_concept_id = 1585845   -- AoU Basics survey: 'Sex Assigned at Birth'
-    ),
-    demographics AS (
-      SELECT
-        p.person_id,
-        DATE_DIFF(DATE '%s', DATE(p.birth_datetime), YEAR) AS age,
+        DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS age,
         CASE
-          WHEN s.value_as_concept_id = 45878463 THEN 'Female'
-          WHEN s.value_as_concept_id = 45880669 THEN 'Male'
+          WHEN sex_at_birth_concept_id = 45878463 THEN 'Female'
+          WHEN sex_at_birth_concept_id = 45880669 THEN 'Male'
           ELSE 'Other'
         END AS sex_at_birth
-      FROM {CDR}.person p
-      LEFT JOIN sex_at_birth s ON p.person_id = s.person_id AND s.rn = 1
+      FROM {CDR}.person
     ),
     measurements AS (
       SELECT
@@ -162,8 +149,30 @@ pull_covariates <- function(keep_ids) {
     rename(person_id = IID) %>%
     filter(person_id %in% keep_ids)
 
-  zip3 <- tibble(person_id = character(), zip3 = character())        # TODO: real join
-  ses <- tibble(person_id = character(), median_income = double())    # TODO: real join
+  # zip3 comes from a masked (privacy-protected) zip-code observation --
+  # AoU marks these rows with a "*" in value_as_string; the first 3 characters
+  # are the 3-digit zip prefix, joined against the CDR-provided zip3_ses_map
+  zip3_ses_query <- "
+    SELECT
+      o.person_id,
+      z.zip3,
+      z.median_income,
+      z.fraction_poverty AS poverty,
+      z.deprivation_index
+    FROM (
+      SELECT person_id, CAST(SUBSTR(value_as_string, 1, 3) AS INT64) AS zip3
+      FROM {CDR}.observation
+      WHERE STRPOS(value_as_string, '*') > 0
+    ) o
+    INNER JOIN {CDR}.zip3_ses_map z ON o.zip3 = z.zip3
+  "
+  zip3_ses <- aou_sql(zip3_ses_query) %>%
+    collect() %>%
+    mutate(person_id = as.character(person_id)) %>%
+    filter(person_id %in% keep_ids)
+
+  zip3 <- zip3_ses %>% transmute(person_id, zip3 = as.character(zip3))
+  ses <- zip3_ses %>% select(person_id, median_income, poverty, deprivation_index)
 
   list(pcs = pcs, zip3 = zip3, ses = ses)
 }
