@@ -33,7 +33,11 @@
 *.rds
 *.rdata
 *.RData
-!data/reference/*.panel   # keep the small reference files (public panels only)
+# keep the small reference files (public panels only) -- note: inline comments
+# on a gitignore pattern line are NOT comments, they're part of the pattern
+!data/reference/*.panel
+# public OMOP concept_ids, not participant data
+!02_phenotype/docs/phenotype_list.tsv
 
 # ID / keep-remove lists -- only ever force-add these for PUBLIC reference
 # panel IDs (e.g. 1000 Genomes), never for anything derived from an AoU cohort
