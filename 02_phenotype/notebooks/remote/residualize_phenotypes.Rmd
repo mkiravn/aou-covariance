@@ -38,6 +38,10 @@ library(bigrquery)
 library(allofus)
 source("../../scripts/local/residualize_lib.R")   # transform, residualize, export -- shared with the fake-data test
 
+options(bigrquery.quiet = TRUE)   # suppress per-page download progress messages -- large
+                                   # pulls (e.g. zip3_ses_map) can otherwise print fast enough
+                                   # to trip Jupyter's IOPub rate limit ("IOPub data rate exceeded")
+
 con <- aou_connect()   # BigQuery connection to the CDR, used by pull_phenotype() below
 ```
 

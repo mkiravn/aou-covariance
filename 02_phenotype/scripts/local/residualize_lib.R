@@ -80,12 +80,18 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
   skew_diagnostics <- list()
   combo_diagnostics <- list()
 
+  # covariates don't depend on the phenotype -- pull once, not once per
+  # phenotype. Calling this inside the loop re-downloaded the full
+  # zip3_ses_map join (unfiltered by keep_ids server-side) on every
+  # iteration, which is both slow and can trip Jupyter's IOPub rate limit
+  # from bigrquery's per-page download progress output.
+  covars <- pull_covariates(keep_ids)
+
   for (i in seq_len(nrow(pheno_list))) {
     row <- pheno_list[i, ]
     name <- row$phenotype_name
 
     pheno_df <- pull_phenotype(row, keep_ids)
-    covars <- pull_covariates(keep_ids)
 
     df <- pheno_df %>%
       left_join(covars$pcs, by = "person_id") %>%
