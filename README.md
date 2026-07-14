@@ -66,7 +66,7 @@ happens once, at the point something actually leaves the workbench, not
 at the folder level.
 
 ```
-$WORKSPACE_BUCKET/data/
+~/workspace/<bucket resource>/data/
 ├── 01_ancestry_filtering/
 │   ├── 1000g_hm3/      # merged whole-genome bfile + HM3 snplist
 │   └── round1_pca/     # PCA loadings/scores
@@ -75,12 +75,13 @@ $WORKSPACE_BUCKET/data/
 └── 04_process_shards/
 ```
 
-Bucket paths under `data/<stage>/` are the source of truth. Where possible,
-tools read and write there directly instead of staging through local disk —
-notebooks mount the bucket with `gcsfuse` so plink/GCTA can treat
-`$WORKSPACE_BUCKET/data/...` as an ordinary local path. Fall back to plain
+Bucket paths under `data/<stage>/` are the source of truth. On Verily
+Workbench, the workspace bucket is auto-mounted at `~/workspace/<resource
+name>/` — tools read and write there directly as an ordinary local path, no
+manual mount step needed (`ls ~/workspace/` to find the resource name; `wb
+resource list` / `env | grep WORKBENCH` also work). Fall back to plain
 local disk + explicit `gsutil cp`/`rsync` only for tools that genuinely need
-low-level filesystem access `gcsfuse` doesn't support well (heavy random
+low-level filesystem access the mount doesn't support well (heavy random
 I/O); local disk is ephemeral either way and disappears if the environment
 is deleted.
 
