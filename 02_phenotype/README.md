@@ -4,10 +4,12 @@ Download phenotypes/covariates from AoU, normalize (Kemper et al. 2021
 style: residualize → trim outliers → standardize within sex — see main
 README for background).
 
-`notebooks/remote/residualize_phenotypes.ipynb`: takes round 2's
-ancestry-filtered keep-list and a phenotype list TSV, and for every
-phenotype exports one `FID IID Y` file (matching
-`GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per combination of:
+`notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
+`residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
+your environment prefers): takes round 2's ancestry-filtered keep-list and
+a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
+(matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per
+combination of:
 
 - raw vs. rank-inverse-normal-transformed
 - covariate-set (base = sex-at-birth + age; PCs / 3-digit zip factor / SES
@@ -30,11 +32,14 @@ Browser for the exact concept_id before running those. These are all
 public, standard vocabulary identifiers describing *which* concepts to
 pull — not participant data, fine to have in git.
 
+`pull_phenotype()` is implemented for `source == "measurement"` via the
+`allofus` package (`aou_connect()` + `aou_sql()`), most recent value per
+person, joined to sex-at-birth and age from `person`. Age is computed from
+a single fixed `REFERENCE_DATE` (set per run) rather than at each
+phenotype's own measurement time — simpler, and matches validated
+real-world usage.
+
 **Not yet filled in**, needs the real workbench to pin down:
-- the actual BigQuery pulls per phenotype source (`measurement` / `survey`
-  / `condition`)
+- `survey` / `condition` phenotype sources (only `measurement` is wired up)
 - `zip3_ses_map`'s join path (likely via `observation`, not directly on
   `person`)
-- age definition — currently written as age at each phenotype's own
-  measurement/response time, since AoU doesn't have a single UKB-style
-  assessment visit
