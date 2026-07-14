@@ -116,8 +116,8 @@ pull_phenotype <- function(row, keep_ids) {
         p.person_id,
         DATE_DIFF(DATE '%s', DATE(p.birth_datetime), YEAR) AS age,
         CASE
-          WHEN s.value_as_concept_id = 1585846 THEN 'Male'
-          WHEN s.value_as_concept_id = 1585847 THEN 'Female'
+          WHEN s.value_as_concept_id = 45878463 THEN 'Female'
+          WHEN s.value_as_concept_id = 45880669 THEN 'Male'
           ELSE 'Other'
         END AS sex_at_birth
       FROM {CDR}.person p
