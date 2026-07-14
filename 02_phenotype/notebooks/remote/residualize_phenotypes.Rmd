@@ -96,7 +96,9 @@ Everything below this chunk (transform, covariate-set configs, residualization, 
 pull_phenotype <- function(row, keep_ids) {
   cache_path <- file.path(RAW_PHENO_CACHE_DIR, paste0(row$phenotype_name, ".tsv"))
   if (file.exists(cache_path)) {
-    return(read_tsv(cache_path, col_types = cols(person_id = "c", phenotype = "d", age = "d", sex_at_birth = "c")))
+    cached <- read_tsv(cache_path, col_types = cols(person_id = "c", phenotype = "d", age = "d", sex_at_birth = "c"))
+    if (nrow(cached) > 0) return(cached)
+    warning(sprintf("pull_phenotype(): ignoring stale empty cache for '%s', re-pulling", row$phenotype_name))
   }
 
   if (row$source != "measurement") {
@@ -139,8 +141,15 @@ pull_phenotype <- function(row, keep_ids) {
     mutate(person_id = as.character(person_id)) %>%
     filter(person_id %in% keep_ids)
 
-  write_tsv(pheno_df, cache_path)   # cache the raw pull -- avoids re-hitting BigQuery on every
-                                     # downstream iteration; delete the file to force a refresh
+  if (nrow(pheno_df) == 0) {
+    warning(sprintf(
+      "pull_phenotype(): '%s' returned 0 rows -- not caching. Check concept_id, REFERENCE_DATE, and that keep_ids actually overlaps person_id.",
+      row$phenotype_name
+    ))
+  } else {
+    write_tsv(pheno_df, cache_path)   # cache the raw pull -- avoids re-hitting BigQuery on every
+                                       # downstream iteration; delete the file to force a refresh
+  }
   pheno_df
 }
 
