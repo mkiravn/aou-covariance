@@ -7,7 +7,11 @@ as AoU batch jobs, store shards in the workspace bucket.
 to a genome-wide run — QC (min MAF 1%, HWE 1e-6, missingness < 5%, biallelic
 only) on ACAF's chr22, restricted to round 2b's ancestry-filtered keep-list,
 then random thinning (`plink2 --thin`) tuned toward a ~1M-variant genome-wide
-target. QC and thinning are separate plink2 calls specifically so re-tuning
+target. ACAF's pvar ships with the variant ID column unset (`.` for every
+variant), so `--rm-dup` has nothing to compare IDs against unless
+`--set-all-var-ids '@:#:$r:$a'` runs first (same convention as
+`submit_pca_r1.ipynb`'s ACAF handling) — without it, `--rm-dup` silently
+removes 0 variants regardless of how many duplicates actually exist. QC and thinning are separate plink2 calls specifically so re-tuning
 the thinning probability doesn't require re-running the (expensive) QC pass.
 Every plink2 call is timed (`time`) — chr22 is ~1.6% of the autosomal genome
 by length, so this is the seed estimate for genome-wide QC wall-clock time and
