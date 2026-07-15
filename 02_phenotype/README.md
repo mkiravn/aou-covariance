@@ -16,10 +16,12 @@ practice. Reads both round 2 (`round2_filter.ipynb`, 1000G-fit ellipsoid,
 the default) and round 2b (`reverse_pca_aou.ipynb`, AoU-fit ellipsoid,
 provisional) keep-lists, so either can be checked against — flip
 `KEEP_LIST_PATH` to compare. Finishes with a mock residualization: runs
-`residualize_lib.R`'s real `residualize_phenotype()` (base covariate set —
-`age` only, since PCs/zip3/SES aren't wired in here) on the real data just
-pulled, so the pipeline's core statistical step gets exercised against real
-AoU values, not just synthetic data like `test_residualize_fake_data.ipynb`.
+`residualize_lib.R`'s real `residualize_phenotype()` on the real data just
+pulled, for both `base` (`age` only) and `base_pcs` (`age` + round 2b's
+`PC1..PC20`, joined in from `reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH`
+output — zip3/SES still aren't wired in here). Exercises the pipeline's
+core statistical step against real AoU values, not just synthetic data like
+`test_residualize_fake_data.ipynb`.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
