@@ -65,6 +65,15 @@ real-world usage.
 `observation` row (marked with a `*` in `value_as_string`), joined on
 zip3 to get `median_income`, `poverty`, `deprivation_index`.
 
+Every numeric covariate pulled from BigQuery (`age`, `median_income`,
+`poverty`, `deprivation_index`) is explicitly `CAST(... AS FLOAT64)` in the
+SQL. Bare `INT64` columns collect via `bigrquery`/`allofus` as
+`bit64::integer64`, not a plain double, and `lm()` silently mis-coerces
+that into a degenerate fit (`r_squared = NaN`, everything trimmed as an
+outlier) rather than erroring — caught by `query_filter_check.ipynb`'s
+mock residualization step on `age`, fixed the same way everywhere else a
+raw `INT64` covariate is pulled in.
+
 Raw `pull_phenotype()` output is cached per phenotype under
 `RAW_PHENO_CACHE_DIR` (one TSV per phenotype), so re-running the notebook
 while iterating on `residualize_lib.R` doesn't re-hit BigQuery — delete a

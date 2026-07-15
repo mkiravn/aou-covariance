@@ -106,11 +106,14 @@ pull_phenotype <- function(row, keep_ids) {
     ))
   }
 
+  # DATE_DIFF returns INT64; bigrquery collects bare INT64 columns as bit64::integer64,
+  # which lm() silently mis-coerces into a degenerate fit rather than erroring -- cast to
+  # FLOAT64 in the query so age collects as a plain double
   query <- sprintf("
     WITH demographics AS (
       SELECT
         person_id,
-        DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS age,
+        CAST(DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS FLOAT64) AS age,
         CASE
           WHEN sex_at_birth_concept_id = 45878463 THEN 'Female'
           WHEN sex_at_birth_concept_id = 45880669 THEN 'Male'
@@ -151,14 +154,17 @@ pull_covariates <- function(keep_ids) {
 
   # zip3 comes from a masked (privacy-protected) zip-code observation --
   # AoU marks these rows with a "*" in value_as_string; the first 3 characters
-  # are the 3-digit zip prefix, joined against the CDR-provided zip3_ses_map
+  # are the 3-digit zip prefix, joined against the CDR-provided zip3_ses_map.
+  # median_income/poverty/deprivation_index cast to FLOAT64 for the same reason
+  # as age in pull_phenotype() -- an unqualified INT64 column collects as
+  # bit64::integer64, which lm() silently mis-coerces rather than erroring
   zip3_ses_query <- "
     SELECT
       o.person_id,
       z.zip3,
-      z.median_income,
-      z.fraction_poverty AS poverty,
-      z.deprivation_index
+      CAST(z.median_income AS FLOAT64) AS median_income,
+      CAST(z.fraction_poverty AS FLOAT64) AS poverty,
+      CAST(z.deprivation_index AS FLOAT64) AS deprivation_index
     FROM (
       SELECT person_id, CAST(SUBSTR(value_as_string, 1, 3) AS INT64) AS zip3
       FROM {CDR}.observation
