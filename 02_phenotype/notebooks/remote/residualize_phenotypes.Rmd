@@ -193,7 +193,7 @@ Rank-based inverse-normal transform (`inverse_normal_transform()` in `residualiz
 `build_covariate_sets()` (in `residualize_lib.R`) returns a named list of formula RHS vectors. `sex_at_birth` is handled separately (it's the stratification variable for step 3, not a residualization covariate -- see `residualize_phenotype()` in the lib), so it's not in these formulas.
 
 ```{r covariate-sets}
-pc_cols <- paste0("PC", 1:20)   # matches round 1's 20-PC output
+pc_cols <- paste0("PC", 1:5)   # top 5 only -- beyond that isn't considered informative for this cohort
 covariate_sets <- build_covariate_sets(pc_cols)
 names(covariate_sets)
 ```
