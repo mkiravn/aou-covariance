@@ -10,16 +10,9 @@ just the 3 fully-confirmed phenotypes from `docs/phenotype_list.tsv` (no
 `UNCONFIRMED` lipid rows) and checks concept_id validity, pull row/person
 counts, the keep-list filtering funnel, sex_at_birth breakdown, and value
 ranges. Every cell prints aggregate counts/summary stats only, never a
-person-level row. Connects via `bigrquery` directly (`wb resolve` to get the
-CDR BigQuery dataset) rather than `allofus`, since `allofus::aou_connect()`'s
-`{CDR}` resolution was built against the legacy Researcher Workbench's
-`WORKSPACE_CDR` env var and its behavior on Workbench 2.0 (Verily) is
-unconfirmed — if this notebook's connection works and the main pipeline's
-`allofus` calls don't, switch `pull_phenotype()` / `pull_covariates()` below
-to the same `bigrquery` pattern. BigQuery jobs bill against your workspace's
-own GCP project (1:1 per Workbench 2.0 workspace), not the CDR's — passing
-the CDR's project as `billing` fails with an `Access Denied ...
-bigquery.jobs.create` error, since you're read-only there.
+person-level row. Connects via `allofus::aou_connect()` / `aou_sql()`, same
+as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
+practice.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
