@@ -18,8 +18,10 @@ provisional) keep-lists, so either can be checked against — flip
 `KEEP_LIST_PATH` to compare. Finishes with a mock residualization: runs
 `residualize_lib.R`'s real `residualize_phenotype()` on the real data just
 pulled, for both `base` (`age` only) and `base_pcs` (`age` + round 2b's
-`PC1..PC20`, joined in from `reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH`
-output). Exercises the pipeline's core statistical step against real AoU
+`PC1..PC5`, joined in from `reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH`
+output — round 2b's file has 20, only the top 5 are used as covariates;
+beyond that isn't considered informative for this cohort). Exercises the
+pipeline's core statistical step against real AoU
 values, not just synthetic data like `test_residualize_fake_data.ipynb`.
 Then goes deeper: pulls SES data (same `zip3_ses_map` join as
 `pull_covariates()`, zip3 itself included this time), fits `base_pcs_ses`
