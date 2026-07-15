@@ -12,7 +12,10 @@ counts, the keep-list filtering funnel, sex_at_birth breakdown, and value
 ranges. Every cell prints aggregate counts/summary stats only, never a
 person-level row. Connects via `allofus::aou_connect()` / `aou_sql()`, same
 as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
-practice.
+practice. Reads both round 2 (`round2_filter.ipynb`, 1000G-fit ellipsoid,
+the default) and round 2b (`reverse_pca_aou.ipynb`, AoU-fit ellipsoid,
+provisional) keep-lists, so either can be checked against — flip
+`KEEP_LIST_PATH` to compare.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
