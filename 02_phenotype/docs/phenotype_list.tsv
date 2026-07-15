@@ -1,11 +1,11 @@
-phenotype_name	source	concept_id	value_field	notes
-height	measurement	3036277		Body height, standard OMOP concept, confirmed
-weight	measurement	3025315		Body weight, standard OMOP concept, confirmed
-bmi	measurement	3038553		Body mass index (BMI) [Ratio], LOINC 39156-5, confirmed
-systolic_bp	measurement	3004249		Systolic blood pressure, confirmed
-diastolic_bp	measurement	3012888		Diastolic blood pressure, confirmed
-glucose	measurement	3004501		Glucose [Mass/volume] in Serum or Plasma, LOINC 2345-7, confirmed
-hba1c	measurement	3004410		Hemoglobin A1c/Hemoglobin.total in Blood, LOINC 4548-4, confirmed
-hdl_cholesterol	measurement	UNCONFIRMED		LOINC 2085-9 (Cholesterol in HDL) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use
-ldl_cholesterol	measurement	UNCONFIRMED		LOINC 13457-7 (Cholesterol in LDL, calculated) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use
-triglycerides	measurement	UNCONFIRMED		LOINC 2571-8 (Triglyceride) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use
+phenotype_name	source	concept_id	value_field	plausible_min	plausible_max	notes
+height	measurement	3036277		100	250	Body height, standard OMOP concept, confirmed. Range in cm.
+weight	measurement	3025315		20	300	Body weight, standard OMOP concept, confirmed. Range in kg.
+bmi	measurement	3038553		10	100	Body mass index (BMI) [Ratio], LOINC 39156-5, confirmed. Range in kg/m^2.
+systolic_bp	measurement	3004249		60	260	Systolic blood pressure, confirmed. Range in mmHg.
+diastolic_bp	measurement	3012888		30	150	Diastolic blood pressure, confirmed. Range in mmHg.
+glucose	measurement	3004501		20	600	Glucose [Mass/volume] in Serum or Plasma, LOINC 2345-7, confirmed. Range in mg/dL.
+hba1c	measurement	3004410		3	20	Hemoglobin A1c/Hemoglobin.total in Blood, LOINC 4548-4, confirmed. Range in % (NGSP).
+hdl_cholesterol	measurement	UNCONFIRMED		5	150	LOINC 2085-9 (Cholesterol in HDL) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use. Range in mg/dL.
+ldl_cholesterol	measurement	UNCONFIRMED		10	400	LOINC 13457-7 (Cholesterol in LDL, calculated) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use. Range in mg/dL.
+triglycerides	measurement	UNCONFIRMED		10	3000	LOINC 2571-8 (Triglyceride) -- real LOINC code, exact OMOP concept_id not verified, check AoU Data Browser before use. Range in mg/dL.

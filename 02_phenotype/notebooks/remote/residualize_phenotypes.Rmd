@@ -56,6 +56,7 @@ Phenotype list TSV schema (`PHENO_LIST_PATH`):
 | `source` | `measurement` / `survey` / `condition` -- picks the extraction path |
 | `concept_id` | AoU concept ID (comma-separated for multiple) |
 | `value_field` | optional -- which field holds the numeric value |
+| `plausible_min` / `plausible_max` | physiologically-plausible range (original units) -- values outside are dropped before any modeling, see `filter_plausible_range()` in `residualize_lib.R` |
 | `notes` | free text, not used programmatically |
 
 ```{r inputs}
@@ -82,7 +83,7 @@ keep_ids_raw <- read_lines(KEEP_LIST_PATH)
 keep_ids <- str_trim(keep_ids_raw) %>% str_split(" +") %>% sapply(function(x) tail(x, 1))
 
 pheno_list <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
-stopifnot(all(c("phenotype_name", "source", "concept_id") %in% names(pheno_list)))
+stopifnot(all(c("phenotype_name", "source", "concept_id", "plausible_min", "plausible_max") %in% names(pheno_list)))
 pheno_list
 ```
 
@@ -210,6 +211,10 @@ result <- run_residualization(
 ```
 
 ## Diagnostics summary
+
+```{r diagnostics-range}
+result$range_summary_table  # per phenotype: N excluded by the plausible-range filter, before any modeling
+```
 
 ```{r diagnostics-skew}
 result$skew_summary_table   # per phenotype: skewness before/after the invnorm transform

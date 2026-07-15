@@ -1,8 +1,8 @@
 # 02_phenotype
 
-Download phenotypes/covariates from AoU, normalize (Kemper et al. 2021
-style: residualize → trim outliers → standardize within sex — see main
-README for background).
+Download phenotypes/covariates from AoU, normalize (trim implausible
+values → Kemper et al. 2021 style: residualize → trim outliers →
+standardize within sex — see main README for background).
 
 `notebooks/remote/query_filter_check.ipynb`: a smaller smoke test to run
 first, against the real CDR, before trusting the full pipeline below — pulls
@@ -63,6 +63,23 @@ Browser for the exact concept_id before running those. These are all
 public, standard vocabulary identifiers describing *which* concepts to
 pull — not participant data, fine to have in git.
 
+`plausible_min`/`plausible_max` columns (original units, e.g. cm for
+height, mg/dL for glucose): generous physiological-plausibility bounds,
+applied by `filter_plausible_range()` in `residualize_lib.R` before any
+modeling. This is deliberately not the same thing as Kemper et al. 2021's
+existing post-residual 5-SD trim (still in `residualize_phenotype()`,
+unchanged) — that trim only catches values extreme *relative to the fitted
+model*, computed separately per covariate-set, so a data-entry error that
+happens to land near the model's mean can slip through it. EHR-sourced
+measurements (unlike a curated cohort assessment like UK Biobank's) carry a
+non-trivial rate of exactly this kind of error — AoU's own analysis of
+height/weight in the EHR found ~1.4-1.5% flagged as erroneous
+([Zhou et al. 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11973958/)) —
+so a wide absolute-range filter is a cheap, standard complement. Bounds
+here are intentionally generous (e.g. height 100-250cm, not a "normal"
+range) — the goal is dropping impossible values, not disease-range ones,
+which are real biological variation GWAS wants to keep.
+
 `pull_phenotype()` is implemented for `source == "measurement"` via the
 `allofus` package (`aou_connect()` + `aou_sql()`), most recent value per
 person, joined to age from `person` and sex from `person.
@@ -92,7 +109,9 @@ while iterating on `residualize_lib.R` doesn't re-hit BigQuery — delete a
 phenotype's cache file to force a refresh. Any covariate-set combo whose
 covariates are entirely `NA` for a given phenotype is skipped rather than
 crashing the whole run; check `combo_summary_table$status` for which
-combos actually ran.
+combos actually ran. `run_residualization()`'s returned
+`range_summary_table` reports how many values `filter_plausible_range()`
+dropped per phenotype, before any of that.
 
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
