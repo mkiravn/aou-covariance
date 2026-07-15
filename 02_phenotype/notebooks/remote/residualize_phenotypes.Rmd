@@ -89,8 +89,19 @@ keep_ids_raw <- read_lines(KEEP_LIST_PATH)
 # space-separated -- take the last whitespace-separated field either way
 keep_ids <- str_trim(keep_ids_raw) %>% str_split(" +") %>% sapply(function(x) tail(x, 1))
 
-pheno_list <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
-stopifnot(all(c("phenotype_name", "source", "concept_id", "plausible_min", "plausible_max") %in% names(pheno_list)))
+pheno_list_all <- read_tsv(PHENO_LIST_PATH, col_types = cols(.default = "c"))
+stopifnot(all(c("phenotype_name", "source", "concept_id", "plausible_min", "plausible_max") %in% names(pheno_list_all)))
+
+# UNCONFIRMED concept_ids (currently the 3 lipid rows -- see phenotype_list.tsv's
+# notes column) aren't real AoU concept IDs and can't be queried; excluded here
+# rather than left to fail deep inside pull_phenotype() with an opaque BigQuery
+# error. Confirm the concept_id against the AoU Data Browser and edit
+# phenotype_list.tsv to include those phenotypes in a run.
+unconfirmed <- pheno_list_all$phenotype_name[pheno_list_all$concept_id == "UNCONFIRMED"]
+if (length(unconfirmed) > 0) {
+  message("Skipping phenotypes with UNCONFIRMED concept_id: ", paste(unconfirmed, collapse = ", "))
+}
+pheno_list <- pheno_list_all %>% filter(concept_id != "UNCONFIRMED")
 pheno_list
 ```
 
@@ -111,6 +122,13 @@ pull_phenotype <- function(row, keep_ids) {
     stop(sprintf(
       "pull_phenotype(): source '%s' not implemented -- only 'measurement' is wired up so far",
       row$source
+    ))
+  }
+
+  if (!grepl("^[0-9]+(,[0-9]+)*$", row$concept_id)) {
+    stop(sprintf(
+      "pull_phenotype(): '%s' has concept_id '%s', not a valid comma-separated numeric AoU concept ID -- confirm it against the AoU Data Browser and fix docs/phenotype_list.tsv before running this phenotype",
+      row$phenotype_name, row$concept_id
     ))
   }
 
