@@ -90,19 +90,21 @@ write_grm_pheno <- function(df, file) {
               row.names = FALSE, col.names = TRUE, na = "NA")
 }
 
-# Runs the full phenotype x {raw, invnorm} x covariate-set cross product,
-# writing one .pheno file per combination and returning diagnostics.
-# `pull_phenotype(row, keep_ids)` and `pull_covariates(keep_ids)` are
-# supplied by the caller -- real AoU pulls in the remote notebook, synthetic
-# generators in the local fake-data test.
-run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates,
-                                 covariate_sets, out_dir) {
+# Pulls each phenotype, applies the plausible-range filter, joins covariates,
+# adds the invnorm variant, and writes one neat TSV per phenotype to
+# table_dir (<phenotype_name>.tsv: person_id, phenotype, phenotype__invnorm,
+# age, sex_at_birth, plus whatever pull_covariates() returns -- PCs, zip3,
+# SES). This is the only step that hits BigQuery / calls pull_phenotype() /
+# pull_covariates(); table_dir is meant to live in the workspace bucket
+# (data/02_phenotype/modeling_tables/, see root README's bucket layout) so
+# tuning the residualization procedure itself -- covariate-set formulas,
+# outlier_sd, which variant -- via run_residualization_from_tables() never
+# needs to re-pull anything.
+prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates, table_dir) {
   stopifnot(all(c("plausible_min", "plausible_max") %in% names(pheno_list)))
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 
   range_diagnostics <- list()
-  skew_diagnostics <- list()
-  combo_diagnostics <- list()
 
   for (i in seq_len(nrow(pheno_list))) {
     row <- pheno_list[i, ]
@@ -127,6 +129,26 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
       left_join(covars$zip3, by = "person_id") %>%
       left_join(covars$ses, by = "person_id") %>%
       add_transformed_variant("phenotype")
+
+    write_tsv(df, file.path(table_dir, paste0(name, ".tsv")))
+  }
+
+  list(range_summary_table = bind_rows(range_diagnostics))
+}
+
+# Reads each phenotype's prepared table (prepare_modeling_tables()'s output)
+# and runs the {raw, invnorm} x covariate-set cross product, writing one
+# .pheno file per combination -- no BigQuery access needed, so this is cheap
+# to rerun on its own while iterating on covariate_sets / outlier_sd / which
+# phenotypes to include.
+run_residualization_from_tables <- function(pheno_list, table_dir, covariate_sets, out_dir) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  skew_diagnostics <- list()
+  combo_diagnostics <- list()
+
+  for (name in pheno_list$phenotype_name) {
+    df <- read_tsv(file.path(table_dir, paste0(name, ".tsv")), show_col_types = FALSE)
 
     skew_diagnostics[[paste0(name, "__raw")]] <-
       skew_summary(df$phenotype, "raw") %>% mutate(phenotype = name, .before = 1)
@@ -168,8 +190,21 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
   }
 
   list(
-    range_summary_table = bind_rows(range_diagnostics),
     skew_summary_table = bind_rows(skew_diagnostics),
     combo_summary_table = bind_rows(combo_diagnostics)
   )
+}
+
+# Convenience wrapper for callers that don't care about the two-stage split --
+# same behavior/return shape (range_summary_table, skew_summary_table,
+# combo_summary_table) as before prepare_modeling_tables()/
+# run_residualization_from_tables() were split apart. `pull_phenotype(row,
+# keep_ids)` and `pull_covariates(keep_ids)` are supplied by the caller --
+# real AoU pulls in the remote notebook, synthetic generators in the local
+# fake-data test.
+run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates,
+                                 covariate_sets, out_dir, table_dir = tempfile("modeling_tables_")) {
+  prep <- prepare_modeling_tables(pheno_list, keep_ids, pull_phenotype, pull_covariates, table_dir)
+  rest <- run_residualization_from_tables(pheno_list, table_dir, covariate_sets, out_dir)
+  c(list(range_summary_table = prep$range_summary_table), rest)
 }

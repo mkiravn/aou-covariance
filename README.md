@@ -71,6 +71,9 @@ at the folder level.
 │   ├── 1000g_hm3/      # merged whole-genome bfile + HM3 snplist
 │   └── round1_pca/     # PCA loadings/scores
 ├── 02_phenotype/
+│   └── modeling_tables/  # one neat TSV per phenotype (prepare_modeling_tables() output) --
+│                         # person_id, phenotype, phenotype__invnorm, age, sex_at_birth + covariates,
+│                         # so retuning the residualization procedure doesn't need re-pulling from BigQuery
 ├── 03_grm_shards/
 └── 04_process_shards/
 ```

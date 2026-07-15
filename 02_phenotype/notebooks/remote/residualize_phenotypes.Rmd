@@ -65,11 +65,17 @@ KEEP_LIST_PATH <- "PLACEHOLDER"   # round 2 output, one person_id per line
 PHENO_LIST_PATH <- "../../docs/phenotype_list.tsv"  # starter anthropometric/metabolic panel -- see its header for concept_id confirmation status
 PC_PATH <- "PLACEHOLDER"          # round 1 .eigenvec (or AoU-projected .sscore)
 OUT_DIR <- "PLACEHOLDER"          # where the FID/IID/Y files get written
+MODELING_TABLE_DIR <- "PLACEHOLDER"   # one neat TSV per phenotype (prepare_modeling_tables()'s
+                                       # output) -- should live in the workspace bucket
+                                       # (data/02_phenotype/modeling_tables/), not local disk:
+                                       # this is what lets the residualization procedure itself
+                                       # get retuned later without re-pulling from BigQuery
 REFERENCE_DATE <- "PLACEHOLDER"   # e.g. "2024-01-01" -- single fixed date age is computed from for every phenotype, not per-measurement
 RAW_PHENO_CACHE_DIR <- "PLACEHOLDER"  # raw pull_phenotype() output per phenotype, cached so repeated
                                        # runs while iterating on residualize_lib.R don't re-hit BigQuery
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(MODELING_TABLE_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(RAW_PHENO_CACHE_DIR, recursive = TRUE, showWarnings = FALSE)
 ```
 
@@ -200,22 +206,26 @@ covariate_sets <- build_covariate_sets(pc_cols)
 names(covariate_sets)
 ```
 
-## Main loop
+## Prepare modeling tables
 
-`run_residualization()` (in `residualize_lib.R`) runs the full cross product of {phenotype} x {raw, invnorm} x {covariate-set}, all exported -- no curation, every combination in `pheno_list` x `covariate_sets` gets written out as an `FID IID Y` file matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format.
+`prepare_modeling_tables()` (in `residualize_lib.R`) is the only chunk below that hits BigQuery -- pulls each phenotype, applies the plausible-range filter, joins PCs/zip3/SES, adds the invnorm variant, and writes one neat TSV per phenotype to `MODELING_TABLE_DIR` (`<phenotype_name>.tsv`: `person_id, phenotype, phenotype__invnorm, age, sex_at_birth`, plus every covariate column). Re-run this chunk only when the phenotype list, keep-list, or covariate pulls themselves change.
+
+```{r prepare-tables}
+prep <- prepare_modeling_tables(
+  pheno_list, keep_ids, pull_phenotype, pull_covariates, MODELING_TABLE_DIR
+)
+prep$range_summary_table  # per phenotype: N excluded by the plausible-range filter, before any modeling
+```
+
+## Run residualization
+
+`run_residualization_from_tables()` reads `MODELING_TABLE_DIR`'s TSVs back in and runs the full cross product of {phenotype} x {raw, invnorm} x {covariate-set}, all exported -- no curation, every combination in `pheno_list` x `covariate_sets` gets written out as an `FID IID Y` file matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format. No BigQuery access needed -- this is the chunk to re-run (on its own, without re-running "Prepare modeling tables" above) when retuning `covariate_sets`, `outlier_sd`, or which phenotypes to residualize.
 
 ```{r main-loop}
-result <- run_residualization(
-  pheno_list, keep_ids, pull_phenotype, pull_covariates,
-  covariate_sets, OUT_DIR
-)
+result <- run_residualization_from_tables(pheno_list, MODELING_TABLE_DIR, covariate_sets, OUT_DIR)
 ```
 
 ## Diagnostics summary
-
-```{r diagnostics-range}
-result$range_summary_table  # per phenotype: N excluded by the plausible-range filter, before any modeling
-```
 
 ```{r diagnostics-skew}
 result$skew_summary_table   # per phenotype: skewness before/after the invnorm transform

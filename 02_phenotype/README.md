@@ -57,6 +57,24 @@ test (fake IDs, fake phenotypes, fake PCs, no AoU access needed) that
 exercises the full pipeline end to end. Run that first if changing
 anything in the lib.
 
+Split into two stages, each its own cell in the real notebook:
+`prepare_modeling_tables()` (pulls, applies the plausible-range filter,
+joins PCs/zip3/SES, adds the invnorm variant, writes one neat TSV per
+phenotype — `<phenotype_name>.tsv`: `person_id, phenotype,
+phenotype__invnorm, age, sex_at_birth`, plus every covariate column — to
+`MODELING_TABLE_DIR`) is the only step that touches BigQuery.
+`run_residualization_from_tables()` reads those TSVs back in and runs the
+`{raw, invnorm} x covariate-set` cross product. `MODELING_TABLE_DIR` should
+live in the workspace bucket (`data/02_phenotype/modeling_tables/`, per
+root README's bucket layout), not local disk — the whole point is that
+retuning the residualization procedure itself (`covariate_sets`,
+`outlier_sd`, which phenotypes) only needs re-running the second stage, not
+re-pulling from BigQuery. `run_residualization()` still exists as a
+convenience wrapper that calls both stages back-to-back (writing tables to
+an ephemeral `tempfile()` dir) — what `test_residualize_fake_data.ipynb`
+and `query_filter_check.ipynb`'s smoke tests use, since they don't need the
+tables to persist.
+
 `docs/phenotype_list.tsv`: a starter real phenotype list, anthropometric +
 metabolic panel (height, weight, BMI, systolic/diastolic BP, glucose,
 HbA1c, HDL/LDL cholesterol, triglycerides), OMOP concept_ids looked up
@@ -108,14 +126,15 @@ mock residualization step on `age`, fixed the same way everywhere else a
 raw `INT64` covariate is pulled in.
 
 Raw `pull_phenotype()` output is cached per phenotype under
-`RAW_PHENO_CACHE_DIR` (one TSV per phenotype), so re-running the notebook
-while iterating on `residualize_lib.R` doesn't re-hit BigQuery — delete a
-phenotype's cache file to force a refresh. Any covariate-set combo whose
-covariates are entirely `NA` for a given phenotype is skipped rather than
-crashing the whole run; check `combo_summary_table$status` for which
-combos actually ran. `run_residualization()`'s returned
-`range_summary_table` reports how many values `filter_plausible_range()`
-dropped per phenotype, before any of that.
+`RAW_PHENO_CACHE_DIR` (one TSV per phenotype) — separate from and upstream
+of `MODELING_TABLE_DIR`'s prepared tables, this only saves re-hitting
+BigQuery within `prepare_modeling_tables()` itself; delete a phenotype's
+cache file to force a refresh. Any covariate-set combo whose covariates
+are entirely `NA` for a given phenotype is skipped rather than crashing
+the whole run; check `combo_summary_table$status` for which combos
+actually ran. `prepare_modeling_tables()`'s returned `range_summary_table`
+reports how many values `filter_plausible_range()` dropped per phenotype,
+before any of that.
 
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
