@@ -22,11 +22,14 @@ pulled, for both `base` (`age` only) and `base_pcs` (`age` + round 2b's
 output). Exercises the pipeline's core statistical step against real AoU
 values, not just synthetic data like `test_residualize_fake_data.ipynb`.
 Then goes deeper: pulls SES data (same `zip3_ses_map` join as
-`pull_covariates()`), fits `base_pcs_ses` directly with `lm()` to inspect
-the actual coefficients (how each phenotype loads onto age/PCs/SES),
-checks covariate encoding (numeric types post-integer64-fix, PC
-mean/SD from `variance-standardize` scoring, `sex_at_birth` category
-counts), and reports phenotype distributions (histograms, skewness
+`pull_covariates()`, zip3 itself included this time), fits `base_pcs_ses`
+directly with `lm()` to inspect the actual coefficients (how each
+phenotype loads onto age/PCs/SES), checks covariate encoding (numeric
+types post-integer64-fix, PC mean/SD from `variance-standardize` scoring,
+`sex_at_birth` category counts, zip3 as a one-hot-encoded factor via
+`base_pcs_zip3_ses` — summarized as dummy-term/significant counts rather
+than printing all ~800 possible zip3 coefficients), and reports phenotype
+distributions (histograms, skewness
 before/after `inverse_normal_transform()`, quantiles, by-sex boxplots) —
 still model-level/aggregate output only, never a person-level row.
 
