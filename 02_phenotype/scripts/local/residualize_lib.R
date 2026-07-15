@@ -37,15 +37,17 @@ filter_plausible_range <- function(df, pheno_col, plausible_min, plausible_max) 
   )
 }
 
-# Named list of covariate-set formula RHS vectors. sex_at_birth is handled
-# separately (the stratification variable for step 3, not a residualization
-# covariate -- see residualize_phenotype()), so it isn't in these formulas.
+# Named list of covariate-set formula RHS vectors -- a nested staircase, each
+# adding one more block on top of the last (base -> +PCs -> +zip3 -> +SES),
+# not independently-toggled combinations. sex_at_birth is handled separately
+# (the stratification variable for step 3, not a residualization covariate --
+# see residualize_phenotype()), so it isn't in these formulas. run_residualization()
+# crosses every entry here with {raw, invnorm} automatically.
 build_covariate_sets <- function(pc_cols) {
   list(
     base              = c("age"),
     base_pcs          = c("age", pc_cols),
     base_pcs_zip3     = c("age", pc_cols, "zip3"),
-    base_pcs_ses      = c("age", pc_cols, "median_income", "poverty", "deprivation_index"),
     base_pcs_zip3_ses = c("age", pc_cols, "zip3", "median_income", "poverty", "deprivation_index")
   )
 }

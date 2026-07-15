@@ -15,25 +15,27 @@ as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
 practice. Reads both round 2 (`round2_filter.ipynb`, 1000G-fit ellipsoid,
 the default) and round 2b (`reverse_pca_aou.ipynb`, AoU-fit ellipsoid,
 provisional) keep-lists, so either can be checked against — flip
-`KEEP_LIST_PATH` to compare. Finishes with a mock residualization: runs
-`residualize_lib.R`'s real `residualize_phenotype()` on the real data just
-pulled, for both `base` (`age` only) and `base_pcs` (`age` + round 2b's
-`PC1..PC5`, joined in from `reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH`
-output — round 2b's file has 20, only the top 5 are used as covariates;
-beyond that isn't considered informative for this cohort). Exercises the
-pipeline's core statistical step against real AoU
-values, not just synthetic data like `test_residualize_fake_data.ipynb`.
-Then goes deeper: pulls SES data (same `zip3_ses_map` join as
-`pull_covariates()`, zip3 itself included this time), fits `base_pcs_ses`
-directly with `lm()` to inspect the actual coefficients (how each
-phenotype loads onto age/PCs/SES), checks covariate encoding (numeric
-types post-integer64-fix, PC mean/SD from `variance-standardize` scoring,
-`sex_at_birth` category counts, zip3 as a one-hot-encoded factor via
-`base_pcs_zip3_ses` — summarized as dummy-term/significant counts rather
-than printing all ~800 possible zip3 coefficients), and reports phenotype
-distributions (histograms, skewness
-before/after `inverse_normal_transform()`, quantiles, by-sex boxplots) —
-still model-level/aggregate output only, never a person-level row.
+`KEEP_LIST_PATH` to compare. Step 5 runs `residualize_lib.R`'s real
+`run_residualization()` — the same function `residualize_phenotypes.ipynb`
+calls, wrapped around the data already pulled in earlier steps instead of
+issuing new BigQuery calls — across all 4 covariate-set combos (round 2b's
+`PC1..PC5` for PCs; round 2b's file has 20, only the top 5 are used, since
+beyond that isn't considered informative for this cohort) crossed with
+`{raw, invnorm}`, exercising the pipeline's actual statistical step against
+real AoU values, not just synthetic data like
+`test_residualize_fake_data.ipynb`. `.pheno`-shaped files land in a
+throwaway `/tmp` directory. Step 6 goes deeper: pulls SES data (same
+`zip3_ses_map` join as `pull_covariates()`, zip3 itself included this
+time), fits `base_pcs_zip3_ses` (the richest combo) directly with `lm()` to
+inspect the actual coefficients (how each phenotype loads onto
+age/PCs/zip3/SES), checks covariate encoding (numeric types
+post-integer64-fix, PC mean/SD from `variance-standardize` scoring,
+`sex_at_birth` category counts, zip3 as a one-hot-encoded factor —
+summarized as dummy-term/significant counts rather than printing all ~800
+possible zip3 coefficients), and reports phenotype distributions
+(histograms, skewness before/after `inverse_normal_transform()`, quantiles,
+by-sex boxplots) — still model-level/aggregate output only, never a
+person-level row.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
@@ -43,8 +45,10 @@ a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
 combination of:
 
 - raw vs. rank-inverse-normal-transformed
-- covariate-set (base = sex-at-birth + age; PCs / 3-digit zip factor / SES
-  vars each independently toggled on top)
+- covariate-set: `build_covariate_sets()` is a nested staircase, not
+  independently-toggled combinations — `base` (sex-at-birth + age) →
+  `base_pcs` (+ PCs) → `base_pcs_zip3` (+ 3-digit zip factor) →
+  `base_pcs_zip3_ses` (+ SES vars)
 
 The residualization/transform/export/diagnostics logic lives in
 `scripts/local/residualize_lib.R`, shared between the real notebook and
