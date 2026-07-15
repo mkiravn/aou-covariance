@@ -17,6 +17,26 @@ skew_summary <- function(x, label) {
   tibble(variant = label, n = sum(!is.na(x)), skewness = e1071::skewness(x, na.rm = TRUE))
 }
 
+# Physiologically-plausible range filter -- catches clear data-entry/unit
+# errors (e.g. a height of 900cm) before any modeling or transform. Bounds
+# are deliberately generous -- wide enough to keep true biological extremes,
+# not clinical "normal" ranges (a disease-range value is real data, not an
+# error). Complementary to, not a replacement for, residualize_phenotype()'s
+# post-residual 5-SD trim (Kemper et al. 2021 Methods): that trim only
+# catches values extreme relative to the *fitted model*, computed separately
+# per covariate-set, so a wrong-but-plausible-looking value can slip through
+# it, or get judged differently depending on which covariates happened to be
+# included. This runs once, up front, independent of any model.
+filter_plausible_range <- function(df, pheno_col, plausible_min, plausible_max) {
+  x <- df[[pheno_col]]
+  in_range <- !is.na(x) & x >= plausible_min & x <= plausible_max
+  list(
+    data = df[in_range, ],
+    n_input = nrow(df),
+    n_excluded = sum(!in_range)
+  )
+}
+
 # Named list of covariate-set formula RHS vectors. sex_at_birth is handled
 # separately (the stratification variable for step 3, not a residualization
 # covariate -- see residualize_phenotype()), so it isn't in these formulas.
@@ -75,8 +95,10 @@ write_grm_pheno <- function(df, file) {
 # generators in the local fake-data test.
 run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates,
                                  covariate_sets, out_dir) {
+  stopifnot(all(c("plausible_min", "plausible_max") %in% names(pheno_list)))
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
+  range_diagnostics <- list()
   skew_diagnostics <- list()
   combo_diagnostics <- list()
 
@@ -85,6 +107,17 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
     name <- row$phenotype_name
 
     pheno_df <- pull_phenotype(row, keep_ids)
+
+    range_result <- filter_plausible_range(
+      pheno_df, "phenotype", as.numeric(row$plausible_min), as.numeric(row$plausible_max)
+    )
+    pheno_df <- range_result$data
+    range_diagnostics[[name]] <- tibble(
+      phenotype = name, n_input = range_result$n_input,
+      n_excluded_implausible = range_result$n_excluded,
+      n_after_range_filter = nrow(pheno_df)
+    )
+
     covars <- pull_covariates(keep_ids)
 
     df <- pheno_df %>%
@@ -133,6 +166,7 @@ run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covar
   }
 
   list(
+    range_summary_table = bind_rows(range_diagnostics),
     skew_summary_table = bind_rows(skew_diagnostics),
     combo_summary_table = bind_rows(combo_diagnostics)
   )
