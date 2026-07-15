@@ -85,6 +85,13 @@ Browser for the exact concept_id before running those. These are all
 public, standard vocabulary identifiers describing *which* concepts to
 pull — not participant data, fine to have in git.
 
+`residualize_phenotypes.ipynb`/`.Rmd` filter `UNCONFIRMED` rows out of
+`pheno_list` right after reading it (with a `message()` naming which ones
+got skipped) — `pull_phenotype()` also refuses to run on a non-numeric
+`concept_id` as a second line of defense, so a bad row fails with a clear
+message instead of building `WHERE measurement_concept_id IN (UNCONFIRMED)`
+and failing deep inside BigQuery with an opaque `aou_sql()` error.
+
 `plausible_min`/`plausible_max` columns (original units, e.g. cm for
 height, mg/dL for glucose): generous physiological-plausibility bounds,
 applied by `filter_plausible_range()` in `residualize_lib.R` before any
