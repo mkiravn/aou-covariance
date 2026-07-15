@@ -19,9 +19,16 @@ provisional) keep-lists, so either can be checked against — flip
 `residualize_lib.R`'s real `residualize_phenotype()` on the real data just
 pulled, for both `base` (`age` only) and `base_pcs` (`age` + round 2b's
 `PC1..PC20`, joined in from `reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH`
-output — zip3/SES still aren't wired in here). Exercises the pipeline's
-core statistical step against real AoU values, not just synthetic data like
-`test_residualize_fake_data.ipynb`.
+output). Exercises the pipeline's core statistical step against real AoU
+values, not just synthetic data like `test_residualize_fake_data.ipynb`.
+Then goes deeper: pulls SES data (same `zip3_ses_map` join as
+`pull_covariates()`), fits `base_pcs_ses` directly with `lm()` to inspect
+the actual coefficients (how each phenotype loads onto age/PCs/SES),
+checks covariate encoding (numeric types post-integer64-fix, PC
+mean/SD from `variance-standardize` scoring, `sex_at_birth` category
+counts), and reports phenotype distributions (histograms, skewness
+before/after `inverse_normal_transform()`, quantiles, by-sex boxplots) —
+still model-level/aggregate output only, never a person-level row.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
