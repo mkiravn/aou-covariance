@@ -11,7 +11,10 @@ target. QC and thinning are separate plink2 calls specifically so re-tuning
 the thinning probability doesn't require re-running the (expensive) QC pass.
 Every plink2 call is timed (`time`) — chr22 is ~1.6% of the autosomal genome
 by length, so this is the seed estimate for genome-wide QC wall-clock time and
-for sizing the shard/batch-job parallelization below. Parallelization itself
+for sizing the shard/batch-job parallelization below. QC'd and thinned pgen
+sets (plus their `.log`s, which carry the exact filter counts) get copied
+from local scratch to `data/03_grm_shards/` in the bucket at the end — local
+scratch isn't guaranteed to survive a session restart. Parallelization itself
 (`--parallel k n`, `GRM-pairs/grm_bin_sharded`) isn't attempted yet — that's
 the next phase, once this notebook's numbers say how big a genome-wide QC job
 actually is.
