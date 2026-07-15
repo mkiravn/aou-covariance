@@ -16,7 +16,10 @@ CDR BigQuery dataset) rather than `allofus`, since `allofus::aou_connect()`'s
 `WORKSPACE_CDR` env var and its behavior on Workbench 2.0 (Verily) is
 unconfirmed — if this notebook's connection works and the main pipeline's
 `allofus` calls don't, switch `pull_phenotype()` / `pull_covariates()` below
-to the same `bigrquery` pattern.
+to the same `bigrquery` pattern. BigQuery jobs bill against your workspace's
+own GCP project (1:1 per Workbench 2.0 workspace), not the CDR's — passing
+the CDR's project as `billing` fails with an `Access Denied ...
+bigquery.jobs.create` error, since you're read-only there.
 
 `notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
 `residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
