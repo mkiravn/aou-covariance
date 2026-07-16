@@ -29,7 +29,7 @@ dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
 
 required_pkgs <- c("dplyr", "tidyr", "readr", "stringr", "e1071", "bigrquery", "allofus")
 missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
-if (length(missing_pkgs) > 0) install.packages(missing_pkgs, lib = user_lib)
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs)
 
 library(dplyr)
 library(tidyr)
