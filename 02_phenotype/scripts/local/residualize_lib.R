@@ -110,7 +110,28 @@ prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_c
     row <- pheno_list[i, ]
     name <- row$phenotype_name
 
-    pheno_df <- pull_phenotype(row, keep_ids)
+    # a bad row (wrong/unimplemented source, a concept_id that doesn't
+    # actually exist in this CDR version, a transient BigQuery error, ...)
+    # shouldn't take the whole run down with it -- print why and move on to
+    # the next phenotype. pull_covariates() is deliberately NOT wrapped this
+    # way: it's the same call for every phenotype, so a failure there is
+    # systemic, not phenotype-specific, and should stop the run loudly
+    # rather than silently produce N empty phenotypes.
+    pheno_df <- tryCatch(
+      pull_phenotype(row, keep_ids),
+      error = function(e) {
+        message(sprintf("Skipping '%s': pull_phenotype() failed -- %s", name, conditionMessage(e)))
+        NULL
+      }
+    )
+    if (is.null(pheno_df)) {
+      range_diagnostics[[name]] <- tibble(
+        phenotype = name, n_input = NA_integer_,
+        n_excluded_implausible = NA_integer_, n_after_range_filter = NA_integer_,
+        status = "skipped: pull_phenotype() failed"
+      )
+      next
+    }
 
     range_result <- filter_plausible_range(
       pheno_df, "phenotype", as.numeric(row$plausible_min), as.numeric(row$plausible_max)
@@ -119,7 +140,8 @@ prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_c
     range_diagnostics[[name]] <- tibble(
       phenotype = name, n_input = range_result$n_input,
       n_excluded_implausible = range_result$n_excluded,
-      n_after_range_filter = nrow(pheno_df)
+      n_after_range_filter = nrow(pheno_df),
+      status = "ok"
     )
 
     covars <- pull_covariates(keep_ids)
@@ -148,7 +170,21 @@ run_residualization_from_tables <- function(pheno_list, table_dir, covariate_set
   combo_diagnostics <- list()
 
   for (name in pheno_list$phenotype_name) {
-    df <- read_tsv(file.path(table_dir, paste0(name, ".tsv")), show_col_types = FALSE)
+    table_path <- file.path(table_dir, paste0(name, ".tsv"))
+    if (!file.exists(table_path)) {
+      # prepare_modeling_tables() skipped this phenotype (bad row, failed
+      # pull) -- no table to read, so skip the whole {raw, invnorm} x
+      # covariate-set cross product for it rather than erroring on a
+      # missing file
+      message(sprintf("Skipping '%s': no modeling table at %s (prepare_modeling_tables() likely skipped it)", name, table_path))
+      combo_diagnostics[[name]] <- tibble(
+        combo = name, phenotype = name, variant = NA_character_, covariate_set = NA_character_,
+        n_input = NA_integer_, n_retained = NA_integer_, r_squared = NA_real_,
+        status = "skipped: no modeling table found"
+      )
+      next
+    }
+    df <- read_tsv(table_path, show_col_types = FALSE)
 
     skew_diagnostics[[paste0(name, "__raw")]] <-
       skew_summary(df$phenotype, "raw") %>% mutate(phenotype = name, .before = 1)

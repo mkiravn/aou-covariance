@@ -75,53 +75,68 @@ an ephemeral `tempfile()` dir) — what `test_residualize_fake_data.ipynb`
 and `query_filter_check.ipynb`'s smoke tests use, since they don't need the
 tables to persist.
 
-`docs/phenotype_list.tsv`: a starter real phenotype list, anthropometric +
+`docs/phenotype_list.tsv`: the real phenotype list — anthropometric +
 metabolic panel (height, weight, BMI, systolic/diastolic BP, glucose,
-HbA1c, HDL/LDL cholesterol, triglycerides), OMOP concept_ids looked up
-against public AoU/OHDSI documentation. 7 of 10 concept_ids are confirmed;
-the 3 lipid values have a real LOINC code but an unverified concept_id
-(marked `UNCONFIRMED` in the `concept_id` column) — check the AoU Data
-Browser for the exact concept_id before running those. These are all
-public, standard vocabulary identifiers describing *which* concepts to
-pull — not participant data, fine to have in git.
+HbA1c, HDL/LDL/total cholesterol, triglycerides, waist/hip circumference,
+heart rate, creatinine, hemoglobin, WBC count, platelet count, ALT,
+waist_hip_ratio), OMOP concept_ids looked up against public AoU/OHDSI
+documentation. Most of the newer rows (promoted from
+`docs/candidate_phenotypes.tsv`) have `UNCONFIRMED` concept_ids — real
+LOINC codes, exact OMOP concept_id not verified, check the AoU Data
+Browser for each before running. These are all public, standard vocabulary
+identifiers describing *which* concepts to pull — not participant data,
+fine to have in git.
 
 `residualize_phenotypes.ipynb`/`.Rmd` filter `UNCONFIRMED` rows out of
 `pheno_list` right after reading it (with a `message()` naming which ones
 got skipped) — `pull_phenotype()` also refuses to run on a non-numeric
 `concept_id` as a second line of defense, so a bad row fails with a clear
 message instead of building `WHERE measurement_concept_id IN (UNCONFIRMED)`
-and failing deep inside BigQuery with an opaque `aou_sql()` error.
+and failing deep inside BigQuery with an opaque `aou_sql()` error. Beyond
+that, `prepare_modeling_tables()`/`run_residualization_from_tables()` (in
+`residualize_lib.R`) catch a bad row at every remaining failure point —
+`pull_phenotype()` throwing (wrong/unimplemented `source`, a `concept_id`
+that looks numeric but doesn't actually exist in this CDR version, a
+transient BigQuery error) or a missing modeling table — and skip just that
+phenotype with a `message()` and a `status` column recording why, rather
+than taking the whole run down. `pull_covariates()` is deliberately *not*
+given this treatment: it's the same call for every phenotype, so a failure
+there is systemic, not phenotype-specific, and should stop the run loudly.
+`test_residualize_fake_data.ipynb` exercises this with a `fake_broken`
+phenotype whose pull always throws, confirming the other fake phenotypes
+still complete.
 
-`docs/candidate_phenotypes.tsv`: a curated wishlist for expanding beyond
-`phenotype_list.tsv`'s starter panel — same schema plus `expected_completeness`
-(qualitative — EHR labs ordered as part of routine panels like CBC/BMP/lipids
-are consistently high; anything survey- or wearable-sourced is lower, since
-only a self-selected subset of participants respond/share) and `approx_snp_h2`
-(rough published SNP-heritability, general-population GWAS/twin literature,
-*not* AoU-specific — for prioritization, not a claim about what this pipeline
-will actually find). Includes 9 new quantitative EHR labs (waist/hip
-circumference, heart rate, total cholesterol, creatinine, hemoglobin, WBC,
-platelets, ALT) chosen for high expected completeness (routine
-CBC/BMP/lipid-panel components), plus 3 Fitbit-derived phenotypes (resting
-heart rate, daily steps, sleep minutes) flagged `source == "fitbit"` —
-genuinely distinctive to AoU (longitudinal wearable data linked to WGS + EHR,
-not available at this scale in most public biobanks) but a real tradeoff
-against completeness, since only participants who shared Fitbit data are
-represented, and that `source` isn't wired up in `pull_phenotype()` yet (a
+`docs/candidate_phenotypes.tsv`: the same curated wishlist this panel grew
+from — same schema plus `expected_completeness` (qualitative) and
+`approx_snp_h2` (rough published SNP-heritability, general-population
+GWAS/twin literature, *not* AoU-specific — for prioritization, not a claim
+about what this pipeline will actually find), kept around for the rows not
+yet promoted: 3 Fitbit-derived phenotypes (resting heart rate, daily
+steps, sleep minutes) flagged `source == "fitbit"` — genuinely distinctive
+to AoU (longitudinal wearable data linked to WGS + EHR, not available at
+this scale in most public biobanks) but a real tradeoff against
+completeness, since only participants who shared Fitbit data are
+represented, and that `source` isn't wired up in `pull_phenotype()` (a
 different CDR schema entirely — `heart_rate_summary`/`activity_summary`/
-`sleep_daily_summary`, not the OMOP `measurement` table). Adopting a candidate
-means copying its row into `phenotype_list.tsv` after confirming the
-concept_id against the AoU Data Browser (or, for the Fitbit rows, after
-implementing that `pull_phenotype()` source).
+`sleep_daily_summary`, not the OMOP `measurement` table). Promoting one
+means copying its row into `phenotype_list.tsv` after implementing that
+`pull_phenotype()` source.
 
-One row is a different shape entirely: `waist_hip_ratio`, `source ==
-"derived_ratio"`, `concept_id` holding both underlying concept_ids
-(`waist,hip`) — not a single pulled value but `waist_circumference /
-hip_circumference` for the same person, ideally the same visit. Also not
-wired up in `pull_phenotype()`; needs a new code path that pulls both
-concept_ids, joins on person_id *and* nearest `measurement_date` (not two
-independent "most recent value" pulls, which could pair measurements from
-different visits), then divides.
+`waist_hip_ratio` (`source == "derived_ratio"`, already promoted) is a
+different shape from every other row: `concept_id` holds both underlying
+concept_ids (`waist,hip`), and it's not a single pulled value but
+`waist_circumference / hip_circumference` for the same person.
+`pull_phenotype()` still throws on it (unimplemented source, caught and
+skipped like any other bad row) — it's built instead as its own cell in
+`residualize_phenotypes.ipynb`/`.Rmd`, "Derived phenotype: waist/hip
+ratio", which combines the already-prepared `waist_circumference.tsv`/
+`hip_circumference.tsv` modeling tables (no new BigQuery calls) rather
+than pulling fresh. **Caveat carried into that cell's markdown too:**
+`waist`/`hip` are each independently "most recent value as of
+`REFERENCE_DATE`", joined on `person_id` — not matched to the same
+visit/date. AoU's Physical Measurements module tends to collect both
+together, so this is usually fine in practice, but it's worth checking
+first if the ratio's distribution looks off.
 
 `plausible_min`/`plausible_max` columns (original units, e.g. cm for
 height, mg/dL for glucose): generous physiological-plausibility bounds,

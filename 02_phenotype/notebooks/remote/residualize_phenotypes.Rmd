@@ -54,7 +54,7 @@ Phenotype list TSV schema (`PHENO_LIST_PATH`):
 | column | purpose |
 |---|---|
 | `phenotype_name` | label used in output filenames/diagnostics |
-| `source` | `measurement` / `survey` / `condition` -- picks the extraction path |
+| `source` | `measurement` / `survey` / `condition` / `fitbit` / `derived_ratio` -- picks the extraction path (only `measurement` and `derived_ratio` -- the latter for `waist_hip_ratio` specifically -- are actually implemented) |
 | `concept_id` | AoU concept ID (comma-separated for multiple) |
 | `value_field` | optional -- which field holds the numeric value |
 | `plausible_min` / `plausible_max` | physiologically-plausible range (original units) -- values outside are dropped before any modeling, see `filter_plausible_range()` in `residualize_lib.R` |
@@ -107,7 +107,7 @@ pheno_list
 
 ## Pull phenotype + covariate table
 
-`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey`/`condition` phenotype sources aren't wired up yet -- add branches when a phenotype needs them.
+`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey`/`condition`/`fitbit`/`derived_ratio` phenotype sources aren't wired up here -- `pull_phenotype()` throws a clear error on any of them rather than silently doing nothing, and `prepare_modeling_tables()` catches that per-phenotype and skips it (see below) rather than crashing the whole run. `waist_hip_ratio` (`derived_ratio`) is the one exception with an actual implementation, built as its own chunk further down instead of inside `pull_phenotype()`, since it doesn't fit that function's one-concept_id-in, one-value-out shape.
 
 Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
 
@@ -228,6 +228,8 @@ names(covariate_sets)
 
 `prepare_modeling_tables()` (in `residualize_lib.R`) is the only chunk below that hits BigQuery -- pulls each phenotype, applies the plausible-range filter, joins PCs/zip3/SES, adds the invnorm variant, and writes one neat TSV per phenotype to `MODELING_TABLE_DIR` (`<phenotype_name>.tsv`: `person_id, phenotype, phenotype__invnorm, age, sex_at_birth`, plus every covariate column). Re-run this chunk only when the phenotype list, keep-list, or covariate pulls themselves change.
 
+If `pull_phenotype()` throws for a given row (wrong/unimplemented `source`, a `concept_id` that doesn't actually exist in this CDR version, a transient BigQuery error), that phenotype is skipped -- `message()`-printed, recorded in `range_summary_table` below with `status == "skipped: pull_phenotype() failed"` -- rather than taking down every other phenotype's pull too. `pull_covariates()` is deliberately *not* given the same treatment: it runs once per phenotype but is the same call every time, so a failure there is systemic, not phenotype-specific, and should stop the run loudly.
+
 ```{r prepare-tables}
 prep <- prepare_modeling_tables(
   pheno_list, keep_ids, pull_phenotype, pull_covariates, MODELING_TABLE_DIR
@@ -235,9 +237,59 @@ prep <- prepare_modeling_tables(
 prep$range_summary_table  # per phenotype: N excluded by the plausible-range filter, before any modeling
 ```
 
+## Derived phenotype: waist/hip ratio
+
+`waist_hip_ratio` (`source == "derived_ratio"` in `phenotype_list.tsv`) isn't a single pulled measurement -- `pull_phenotype()` throws on it immediately (unimplemented source), which `prepare_modeling_tables()`'s per-phenotype error handling turns into a skip, not a crash. This chunk builds its modeling table directly instead, by combining the `waist_circumference`/`hip_circumference` tables the "Prepare modeling tables" chunk above already wrote (no new BigQuery calls) -- so it must run after that chunk, before "Run residualization" below.
+
+**Caveat:** `waist`/`hip` are each independently "most recent value as of `REFERENCE_DATE`" (same as every other phenotype here), joined on `person_id` -- not matched to the same visit/date. In practice AoU's Physical Measurements module tends to collect both together, so this is usually fine, but if the ratio's distribution looks off, mismatched-visit pairing is the first thing to check.
+
+```{r derived-waist-hip-ratio}
+waist_path <- file.path(MODELING_TABLE_DIR, "waist_circumference.tsv")
+hip_path <- file.path(MODELING_TABLE_DIR, "hip_circumference.tsv")
+
+if (file.exists(waist_path) && file.exists(hip_path)) {
+  waist <- read_tsv(waist_path, show_col_types = FALSE) %>% select(person_id, waist = phenotype)
+  hip <- read_tsv(hip_path, show_col_types = FALSE) %>% select(person_id, hip = phenotype, age, sex_at_birth)
+
+  ratio_row <- pheno_list_all %>% filter(phenotype_name == "waist_hip_ratio")
+  stopifnot(nrow(ratio_row) == 1)
+
+  whr_df <- waist %>%
+    inner_join(hip, by = "person_id") %>%
+    mutate(phenotype = waist / hip) %>%
+    select(person_id, phenotype, age, sex_at_birth)
+
+  range_result <- filter_plausible_range(
+    whr_df, "phenotype", as.numeric(ratio_row$plausible_min), as.numeric(ratio_row$plausible_max)
+  )
+  whr_df <- range_result$data
+
+  covars <- pull_covariates(keep_ids)
+  whr_df <- whr_df %>%
+    left_join(covars$pcs, by = "person_id") %>%
+    left_join(covars$zip3, by = "person_id") %>%
+    left_join(covars$ses, by = "person_id") %>%
+    add_transformed_variant("phenotype")
+
+  write_tsv(whr_df, file.path(MODELING_TABLE_DIR, "waist_hip_ratio.tsv"))
+  message(sprintf(
+    "waist_hip_ratio: %d excluded as implausible, %d written to %s",
+    range_result$n_excluded, nrow(whr_df), file.path(MODELING_TABLE_DIR, "waist_hip_ratio.tsv")
+  ))
+} else {
+  message(
+    "Skipping waist_hip_ratio: waist_circumference.tsv and/or hip_circumference.tsv not found in ",
+    "MODELING_TABLE_DIR -- run 'Prepare modeling tables' first, and confirm both concept_ids in ",
+    "phenotype_list.tsv if either was skipped as UNCONFIRMED or failed to pull"
+  )
+}
+```
+
 ## Run residualization
 
 `run_residualization_from_tables()` reads `MODELING_TABLE_DIR`'s TSVs back in and runs the full cross product of {phenotype} x {raw, invnorm} x {covariate-set}, all exported -- no curation, every combination in `pheno_list` x `covariate_sets` gets written out as an `FID IID Y` file matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format. No BigQuery access needed -- this is the chunk to re-run (on its own, without re-running "Prepare modeling tables" above) when retuning `covariate_sets`, `outlier_sd`, or which phenotypes to residualize.
+
+A phenotype with no table in `MODELING_TABLE_DIR` (skipped above, or never prepared) is likewise skipped here rather than erroring on a missing file -- `message()`-printed, recorded in `combo_summary_table` with `status == "skipped: no modeling table found"`.
 
 ```{r main-loop}
 result <- run_residualization_from_tables(pheno_list, MODELING_TABLE_DIR, covariate_sets, OUT_DIR)
