@@ -122,6 +122,24 @@ different CDR schema entirely — `heart_rate_summary`/`activity_summary`/
 means copying its row into `phenotype_list.tsv` after implementing that
 `pull_phenotype()` source.
 
+2 Lifestyle-survey phenotypes: `alcohol_audit_c_score` (`source ==
+"survey_composite"`, AUDIT-C — the standard validated 3-item alcohol-use
+score, `concept_id` holding all 3 underlying question IDs) and
+`cigarettes_per_day` (`source == "survey"`, from the Lifestyle survey's
+TUS-CPS-derived tobacco items). AoU's core survey battery has no dedicated
+diet/nutrition module (checked the [Survey
+Explorer](https://researchallofus.org/survey-explorer) directly — none of
+the 8 modules cover food intake or a food-frequency questionnaire, unlike
+e.g. UK Biobank), so these are the closest fit to "lifestyle phenotypes"
+actually available. Neither `source` is wired up (`survey_composite` would
+need a new code path entirely — pulling multiple survey answers from
+`{CDR}.observation`, not `{CDR}.measurement`, and summing them, similar in
+spirit to `waist_hip_ratio`'s `derived_ratio` but summing instead of
+dividing). `cigarettes_per_day` is only answered by participants who
+report current/former smoking, so its completeness is meaningfully lower
+than the survey's own response rate — flagged as cutting against the "few
+missing" goal more than any EHR row above.
+
 `waist_hip_ratio` (`source == "derived_ratio"`, already promoted) is a
 different shape from every other row: `concept_id` holds both underlying
 concept_ids (`waist,hip`), and it's not a single pulled value but
