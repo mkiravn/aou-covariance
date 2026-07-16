@@ -3,7 +3,7 @@ title: "Phenotype residualization"
 output: html_document
 ---
 
-Input: round 2's ancestry-filtered keep-list (person IDs) and a phenotype list TSV. Output: one `FID IID Y` file per phenotype x transform x covariate-set combination, matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format.
+Input: round 2b's ancestry-filtered keep-list (person IDs) and a phenotype list TSV. Output: one `FID IID Y` file per phenotype x transform x covariate-set combination, matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format.
 
 Protocol:
 
@@ -44,9 +44,9 @@ con <- aou_connect()   # BigQuery connection to the CDR, used by pull_phenotype(
 
 ## Inputs
 
-- `KEEP_LIST_PATH`: round 2 output -- person IDs passing ancestry filtering.
+- `KEEP_LIST_PATH`: round 2b output (`reverse_pca_aou.ipynb`'s AoU-fit ellipsoid filter) -- person IDs passing ancestry filtering. Flip to round 2's (`round2_filter.ipynb`'s 1000G-fit ellipsoid) if that's the intended cohort instead -- same convention as `query_filter_check.ipynb`'s `KEEP_LIST_PATH_ROUND2`/`KEEP_LIST_PATH_ROUND2B`.
 - `PHENO_LIST_PATH`: TSV describing which phenotypes to pull (see schema below).
-- `PC_PATH`: round 1's PCA output (`.eigenvec`), or round 1's AoU-projected `.sscore` once that step is done.
+- `PC_PATH`: round 2b's PC covariates (`reverse_pca_aou.ipynb`'s `PC_COVARIATE_PATH` output -- `IID`, `PC1`..`PC20` for every sample that passed the round 2b filter).
 - `ZIP3_SES_TABLE`: AoU's `zip3_ses_map` -- exact join path (likely via `observation`, not directly on `person`) still needs confirming against the real workbench, flagged below.
 
 Phenotype list TSV schema (`PHENO_LIST_PATH`):
@@ -61,17 +61,24 @@ Phenotype list TSV schema (`PHENO_LIST_PATH`):
 | `notes` | free text, not used programmatically |
 
 ```{r inputs}
-KEEP_LIST_PATH <- "PLACEHOLDER"   # round 2 output, one person_id per line
+WORKSPACE_BUCKET <- path.expand("~/workspace/Data from All of Us Controlled Tier /shared-env-pilot")
+ANCESTRY_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, "data", "01_ancestry_filtering")
+PHENOTYPE_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, "data", "02_phenotype")
+
+# round 2b: AoU-fit ellipsoid, provisional cross-check (reverse_pca_aou.ipynb) -- see
+# query_filter_check.ipynb's Inputs chunk for the round 2 (1000G-fit, default) alternative
+ROUND2B_OUT_DIR <- file.path(ANCESTRY_BUCKET_DIR, "reverse_pca_aou")
+
+KEEP_LIST_PATH <- file.path(ROUND2B_OUT_DIR, "round2b_keep_ids_aou_fit_r2b_p99.9999.txt")   # round 2b output, one person_id per line
 PHENO_LIST_PATH <- "../../docs/phenotype_list.tsv"  # starter anthropometric/metabolic panel -- see its header for concept_id confirmation status
-PC_PATH <- "PLACEHOLDER"          # round 1 .eigenvec (or AoU-projected .sscore)
-OUT_DIR <- "PLACEHOLDER"          # where the FID/IID/Y files get written
-MODELING_TABLE_DIR <- "PLACEHOLDER"   # one neat TSV per phenotype (prepare_modeling_tables()'s
-                                       # output) -- should live in the workspace bucket
-                                       # (data/02_phenotype/modeling_tables/), not local disk:
-                                       # this is what lets the residualization procedure itself
-                                       # get retuned later without re-pulling from BigQuery
-REFERENCE_DATE <- "PLACEHOLDER"   # e.g. "2024-01-01" -- single fixed date age is computed from for every phenotype, not per-measurement
-RAW_PHENO_CACHE_DIR <- "PLACEHOLDER"  # raw pull_phenotype() output per phenotype, cached so repeated
+PC_PATH <- file.path(ROUND2B_OUT_DIR, "round2b_pc_covariates_p99.9999.txt")   # round 2b's PC1-PC20 for its retained set (reverse_pca_aou.ipynb's PC_COVARIATE_PATH output)
+OUT_DIR <- file.path(PHENOTYPE_BUCKET_DIR, "residualized")          # where the FID/IID/Y files get written
+MODELING_TABLE_DIR <- file.path(PHENOTYPE_BUCKET_DIR, "modeling_tables")   # one neat TSV per phenotype (prepare_modeling_tables()'s
+                                       # output) -- lives in the workspace bucket (per root README's bucket
+                                       # layout), not local disk: this is what lets the residualization
+                                       # procedure itself get retuned later without re-pulling from BigQuery
+REFERENCE_DATE <- "2024-01-01"   # arbitrary fixed date -- adjust to match the CDR version's actual data cutoff, same convention as query_filter_check.ipynb
+RAW_PHENO_CACHE_DIR <- file.path(PHENOTYPE_BUCKET_DIR, "raw_pheno_cache")  # raw pull_phenotype() output per phenotype, cached so repeated
                                        # runs while iterating on residualize_lib.R don't re-hit BigQuery
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
@@ -85,7 +92,7 @@ dir.create(RAW_PHENO_CACHE_DIR, recursive = TRUE, showWarnings = FALSE)
 
 ```{r read-lists}
 keep_ids_raw <- read_lines(KEEP_LIST_PATH)
-# round 2's keep-list is plink-style: either one ID per line, or "FID IID"
+# round 2b's keep-list is plink-style: either one ID per line, or "FID IID"
 # space-separated -- take the last whitespace-separated field either way
 keep_ids <- str_trim(keep_ids_raw) %>% str_split(" +") %>% sapply(function(x) tail(x, 1))
 
