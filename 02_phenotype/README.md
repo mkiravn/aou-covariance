@@ -117,16 +117,37 @@ from — same schema plus `expected_completeness` (qualitative) and
 `approx_snp_h2` (rough published SNP-heritability, general-population
 GWAS/twin literature, *not* AoU-specific — for prioritization, not a claim
 about what this pipeline will actually find), kept around for the rows not
-yet promoted: 3 Fitbit-derived phenotypes (resting heart rate, daily
-steps, sleep minutes) flagged `source == "fitbit"` — genuinely distinctive
-to AoU (longitudinal wearable data linked to WGS + EHR, not available at
-this scale in most public biobanks) but a real tradeoff against
-completeness, since only participants who shared Fitbit data are
-represented, and that `source` isn't wired up in `pull_phenotype()` (a
-different CDR schema entirely — `heart_rate_summary`/`activity_summary`/
-`sleep_daily_summary`, not the OMOP `measurement` table). Promoting one
-means copying its row into `phenotype_list.tsv` after implementing that
-`pull_phenotype()` source.
+yet promoted: 8 Fitbit-derived phenotypes (mean daily steps, sedentary
+minutes, very-active minutes, calories out, sleep minutes, minutes awake,
+minutes in bed, mean heart rate) flagged `source == "fitbit"` — genuinely
+distinctive to AoU (longitudinal wearable data linked to WGS + EHR, not
+available at this scale in most public biobanks) but a real tradeoff
+against completeness, since only participants who shared Fitbit data are
+represented. Schema confirmed directly against the real CDR (via
+`INFORMATION_SCHEMA.TABLES`/`.COLUMNS`, not the OMOP `measurement` table):
+`activity_summary` (daily steps/calories/active-minutes breakdown),
+`sleep_daily_summary` (daily sleep-stage minutes), `heart_rate_minute_level`
+(raw per-minute heart rate — no clean "resting heart rate" field exists
+anywhere in the schema, so `fitbit_mean_heart_rate` averages every
+recorded minute regardless of activity level, not a true resting rate).
+Each of these tables exists in **two variants** in this CDR — lowercase
+with `row_id`/`src_id` columns, and an `UPPERCASE` variant without them —
+not yet confirmed which is the live/current one to actually query.
+
+None of this fits `pull_phenotype()`'s "most recent value" shape even once
+`source == "fitbit"` is implemented: `activity_summary`/
+`sleep_daily_summary` are one row per person *per day*,
+`heart_rate_minute_level` one row per person *per minute*, so every
+Fitbit candidate needs averaging across a person's available days first —
+a real methodological choice, not just an implementation detail. Each
+row's notes carry the same open questions: minimum valid days required
+per person (wearable studies, e.g. UK Biobank's accelerometer data,
+typically enforce a wear-time/day-count threshold so 1-2 noisy days don't
+dominate someone's value), mean vs. median across days, and whether to use
+a date window near `REFERENCE_DATE` or all available history. Promoting
+one means resolving those questions, picking the lowercase-vs-UPPERCASE
+table variant, and implementing the `fitbit` source, not just copying a
+row into `phenotype_list.tsv`.
 
 2 Lifestyle-survey phenotypes: `alcohol_audit_c_score` (`source ==
 "survey_composite"`, AUDIT-C — the standard validated 3-item alcohol-use
