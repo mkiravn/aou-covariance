@@ -114,6 +114,15 @@ means copying its row into `phenotype_list.tsv` after confirming the
 concept_id against the AoU Data Browser (or, for the Fitbit rows, after
 implementing that `pull_phenotype()` source).
 
+One row is a different shape entirely: `waist_hip_ratio`, `source ==
+"derived_ratio"`, `concept_id` holding both underlying concept_ids
+(`waist,hip`) — not a single pulled value but `waist_circumference /
+hip_circumference` for the same person, ideally the same visit. Also not
+wired up in `pull_phenotype()`; needs a new code path that pulls both
+concept_ids, joins on person_id *and* nearest `measurement_date` (not two
+independent "most recent value" pulls, which could pair measurements from
+different visits), then divides.
+
 `plausible_min`/`plausible_max` columns (original units, e.g. cm for
 height, mg/dL for glucose): generous physiological-plausibility bounds,
 applied by `filter_plausible_range()` in `residualize_lib.R` before any
