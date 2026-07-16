@@ -75,6 +75,16 @@ an ephemeral `tempfile()` dir) — what `test_residualize_fake_data.ipynb`
 and `query_filter_check.ipynb`'s smoke tests use, since they don't need the
 tables to persist.
 
+`notebooks/remote/phenotype_exploration.ipynb`: exploratory data science over
+`MODELING_TABLE_DIR`'s already-prepared tables — no BigQuery calls, cheap to
+rerun. Ranks phenotypes by N, plots raw-vs-invnorm density per phenotype,
+refits `residualize_lib.R`'s real `residualize_phenotype()` across the
+covariate-set staircase (raw-vs-residualized density plus N-retained/R²/
+post-residual-skewness stats), and a pairwise phenotype correlation heatmap
+(invnorm scale). Every stat is computed on the full table; only plot
+rendering and the correlation join subsample (`MAX_PLOT_N`), since a density
+plot of 250k+ points buys nothing over 20k.
+
 `docs/phenotype_list.tsv`: the real phenotype list — anthropometric +
 metabolic panel (height, weight, BMI, systolic/diastolic BP, glucose,
 HbA1c, HDL/LDL/total cholesterol, triglycerides, waist/hip circumference,
