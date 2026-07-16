@@ -38,6 +38,7 @@
 !data/reference/*.panel
 # public OMOP concept_ids, not participant data
 !02_phenotype/docs/phenotype_list.tsv
+!02_phenotype/docs/candidate_phenotypes.tsv
 
 # ID / keep-remove lists -- only ever force-add these for PUBLIC reference
 # panel IDs (e.g. 1000 Genomes), never for anything derived from an AoU cohort
