@@ -79,11 +79,17 @@ tables to persist.
 metabolic panel (height, weight, BMI, systolic/diastolic BP, glucose,
 HbA1c, HDL/LDL/total cholesterol, triglycerides, waist/hip circumference,
 heart rate, creatinine, hemoglobin, WBC count, platelet count, ALT,
-waist_hip_ratio), OMOP concept_ids looked up against public AoU/OHDSI
-documentation. Most of the newer rows (promoted from
-`docs/candidate_phenotypes.tsv`) have `UNCONFIRMED` concept_ids — real
-LOINC codes, exact OMOP concept_id not verified, check the AoU Data
-Browser for each before running. These are all public, standard vocabulary
+waist_hip_ratio). Concept_ids for the rows promoted from
+`docs/candidate_phenotypes.tsv` were verified directly against the real
+CDR (the standard `concept`/`concept_relationship` "Maps to" join from
+each LOINC code, plus an `n_persons` sanity check against
+`{CDR}.measurement`) — `hip_circumference` is still `UNCONFIRMED`, since
+its LOINC (8286-7) turned out to map to *thigh* circumference, not hip
+(`n_rows = 0`), caught exactly by this check. `waist_circumference`'s
+concept_id resolved correctly but has only `n_persons = 22` in the whole
+CDR — confirmed correct, essentially unusable — so it, `hip_circumference`,
+and `waist_hip_ratio` are flagged in their `notes` as deprioritized rather
+than actively pursued further. These are all public, standard vocabulary
 identifiers describing *which* concepts to pull — not participant data,
 fine to have in git.
 
