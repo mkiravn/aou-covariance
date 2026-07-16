@@ -54,7 +54,7 @@ Phenotype list TSV schema (`PHENO_LIST_PATH`):
 | column | purpose |
 |---|---|
 | `phenotype_name` | label used in output filenames/diagnostics |
-| `source` | `measurement` / `survey` / `condition` / `fitbit` / `derived_ratio` -- picks the extraction path (only `measurement` and `derived_ratio` -- the latter for `waist_hip_ratio` specifically -- are actually implemented) |
+| `source` | `measurement` / `measurement_unit_normalized` / `survey` / `survey_composite` / `derived_ratio` / `condition` / `fitbit` -- picks the extraction path (`measurement`/`survey`/`measurement_unit_normalized` are all generic in `pull_phenotype()`; `derived_ratio` (`waist_hip_ratio`) and `survey_composite` (`alcohol_audit_c_score`) are each implemented as their own chunk instead, since neither fits `pull_phenotype()`'s one-concept_id-in/one-value-out shape; `condition`/`fitbit` aren't wired up yet) |
 | `concept_id` | AoU concept ID (comma-separated for multiple) |
 | `value_field` | optional -- which field holds the numeric value |
 | `plausible_min` / `plausible_max` | physiologically-plausible range (original units) -- values outside are dropped before any modeling, see `filter_plausible_range()` in `residualize_lib.R` |
@@ -114,7 +114,7 @@ pheno_list
 
 ## Pull phenotype + covariate table
 
-`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey`/`condition`/`fitbit`/`derived_ratio` phenotype sources aren't wired up here -- `pull_phenotype()` throws a clear error on any of them rather than silently doing nothing, and `prepare_modeling_tables()` catches that per-phenotype and skips it (see below) rather than crashing the whole run. `waist_hip_ratio` (`derived_ratio`) is the one exception with an actual implementation, built as its own chunk further down instead of inside `pull_phenotype()`, since it doesn't fit that function's one-concept_id-in, one-value-out shape.
+`pull_phenotype()` handles `source == "measurement"` via `allofus::aou_sql()` (most recent value per person, age computed from a single fixed `REFERENCE_DATE` rather than per-measurement). Sex is `person.sex_at_birth_concept_id` (a direct AoU-specific column -- distinct from `person.gender_concept_id`, which is gender identity). `source == "survey"` (`cigarettes_per_day`) uses the identical most-recent-answer-per-person shape, just against `{CDR}.observation`/`observation_concept_id`/`observation_date` instead -- `cigarettes_per_day`'s `concept_id` holds 2 comma-separated PPI concept_ids (AoU branches the question by current-vs-former smoking status, so a person answers at most one), and the shared `IN (...)` + `ROW_NUMBER()` logic naturally coalesces across both. `source == "measurement_unit_normalized"` (`hemoglobin`) is the same most-recent-per-person `{CDR}.measurement` pull as `measurement`, plus `unit_concept_id` carried along and used to divide by 10 wherever it's 8636 ("gram per liter") -- `unit_source_value`'s free-text label turned out unreliable even for its own dominant group (see `phenotype_list.tsv`'s notes and `query_filter_check.ipynb`'s hemoglobin appendix for the full investigation). `pull_covariates()`'s zip3/SES join uses `zip3_ses_map`, keyed off a masked zip-code `observation` row (AoU privacy-protects exact zip, only the 3-digit prefix survives, marked with a `*` in `value_as_string`). `survey_composite`/`condition`/`fitbit`/`derived_ratio` phenotype sources still aren't wired up here -- `pull_phenotype()` throws a clear error on any of them rather than silently doing nothing, and `prepare_modeling_tables()` catches that per-phenotype and skips it (see below) rather than crashing the whole run. `waist_hip_ratio` (`derived_ratio`) and `alcohol_audit_c_score` (`survey_composite`) are the two exceptions with an actual implementation, each built as its own chunk further down instead of inside `pull_phenotype()`, since neither fits that function's one-concept_id-in, one-value-out shape.
 
 Everything below this chunk (transform, covariate-set configs, residualization, export, diagnostics) doesn't depend on these specifics and is fully generic once `pull_phenotype()` returns a table shaped `person_id, phenotype, age, sex_at_birth`.
 
@@ -125,9 +125,9 @@ pull_phenotype <- function(row, keep_ids) {
     return(read_tsv(cache_path, col_types = cols(person_id = "c", phenotype = "d", age = "d", sex_at_birth = "c")))
   }
 
-  if (row$source != "measurement") {
+  if (!(row$source %in% c("measurement", "survey", "measurement_unit_normalized"))) {
     stop(sprintf(
-      "pull_phenotype(): source '%s' not implemented -- only 'measurement' is wired up so far",
+      "pull_phenotype(): source '%s' not implemented -- only 'measurement'/'survey'/'measurement_unit_normalized' are wired up so far",
       row$source
     ))
   }
@@ -138,6 +138,72 @@ pull_phenotype <- function(row, keep_ids) {
       row$phenotype_name, row$concept_id
     ))
   }
+
+  if (row$source == "measurement_unit_normalized") {
+    # hemoglobin (LOINC 718-7, concept_id 3000963): unit_source_value's free-text label
+    # is unreliable, even for its own dominant group -- confirmed via
+    # query_filter_check.ipynb's hemoglobin appendix: the group literally labeled
+    # "g/dL" (the large majority of this concept's data) has its own median value of
+    # 124, i.e. actually g/L. unit_concept_id is the reliable signal instead -- every
+    # sizeable group shares unit_concept_id 8636 ("gram per liter") regardless of what
+    # the source-text label says, so divide by 10 wherever unit_concept_id = 8636 and
+    # leave unit_concept_id 0/NA (genuinely unknown unit) as reported. Confirmed
+    # against the real CDR: drops this concept's implausible-range exclusion rate from
+    # ~90% to ~1% on the full unrestricted cohort.
+    GRAM_PER_LITER_UNIT_CONCEPT_ID <- 8636
+
+    query <- sprintf("
+      WITH demographics AS (
+        SELECT
+          person_id,
+          CAST(DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS FLOAT64) AS age,
+          CASE
+            WHEN sex_at_birth_concept_id = 45878463 THEN 'Female'
+            WHEN sex_at_birth_concept_id = 45880669 THEN 'Male'
+            ELSE 'Other'
+          END AS sex_at_birth
+        FROM {CDR}.person
+      ),
+      measurements AS (
+        SELECT
+          person_id,
+          value_as_number,
+          unit_concept_id,
+          ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY measurement_date DESC) AS rn
+        FROM {CDR}.measurement
+        WHERE measurement_concept_id IN (%s)
+          AND value_as_number IS NOT NULL
+      )
+      SELECT d.person_id, m.value_as_number, m.unit_concept_id, d.age, d.sex_at_birth
+      FROM demographics d
+      INNER JOIN measurements m ON d.person_id = m.person_id
+      WHERE m.rn = 1
+    ", REFERENCE_DATE, row$concept_id)
+
+    pheno_df <- aou_sql(query) %>%
+      collect() %>%
+      mutate(
+        person_id = as.character(person_id),
+        phenotype = ifelse(unit_concept_id == GRAM_PER_LITER_UNIT_CONCEPT_ID, value_as_number / 10, value_as_number)
+      ) %>%
+      select(person_id, phenotype, age, sex_at_birth) %>%
+      filter(person_id %in% keep_ids)
+
+    write_tsv(pheno_df, cache_path)
+    return(pheno_df)
+  }
+
+  # source == "measurement": most-recent-value-per-person from {CDR}.measurement.
+  # source == "survey": identical shape, but from {CDR}.observation's value_as_number --
+  # cigarettes_per_day's concept_id holds two comma-separated PPI concept_ids (current-
+  # smoker daily count, lifetime-average daily count); AoU's branching survey logic means
+  # a person answers at most one, so this IN (...) + ROW_NUMBER()-most-recent approach
+  # naturally coalesces across both. "Don't know"/"Skip"/"prefer not to answer" responses
+  # are value_as_concept_id-coded, not numeric, so the value_as_number IS NOT NULL filter
+  # already excludes them without any extra lookup.
+  source_table <- if (row$source == "measurement") "measurement" else "observation"
+  concept_col <- if (row$source == "measurement") "measurement_concept_id" else "observation_concept_id"
+  date_col <- if (row$source == "measurement") "measurement_date" else "observation_date"
 
   # DATE_DIFF returns INT64; bigrquery collects bare INT64 columns as bit64::integer64,
   # which lm() silently mis-coerces into a degenerate fit rather than erroring -- cast to
@@ -154,20 +220,20 @@ pull_phenotype <- function(row, keep_ids) {
         END AS sex_at_birth
       FROM {CDR}.person
     ),
-    measurements AS (
+    answers AS (
       SELECT
         person_id,
         value_as_number AS phenotype,
-        ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY measurement_date DESC) AS rn
-      FROM {CDR}.measurement
-      WHERE measurement_concept_id IN (%s)
+        ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY %s DESC) AS rn
+      FROM {CDR}.%s
+      WHERE %s IN (%s)
         AND value_as_number IS NOT NULL
     )
-    SELECT d.person_id, m.phenotype, d.age, d.sex_at_birth
+    SELECT d.person_id, a.phenotype, d.age, d.sex_at_birth
     FROM demographics d
-    INNER JOIN measurements m ON d.person_id = m.person_id
-    WHERE m.rn = 1
-  ", REFERENCE_DATE, row$concept_id)
+    INNER JOIN answers a ON d.person_id = a.person_id
+    WHERE a.rn = 1
+  ", REFERENCE_DATE, date_col, source_table, concept_col, row$concept_id)
 
   pheno_df <- aou_sql(query) %>%
     collect() %>%   # pull out of BigQuery before any local joins/filters -- a
@@ -290,6 +356,84 @@ if (file.exists(waist_path) && file.exists(hip_path)) {
     "phenotype_list.tsv if either was skipped as UNCONFIRMED or failed to pull"
   )
 }
+```
+
+## Derived phenotype: alcohol AUDIT-C score
+
+`alcohol_audit_c_score` (`source == "survey_composite"` in `phenotype_list.tsv`) is a sum of 3 separate survey answers, not a single pulled value -- `pull_phenotype()` throws on it immediately (unimplemented source), same as `waist_hip_ratio` above. Unlike `waist_hip_ratio`, this doesn't depend on any other phenotype's modeling table, so it can run independently of "Prepare modeling tables" above (it still needs `keep_ids`/`pull_covariates()` from earlier chunks).
+
+**Concept_ids and scoring, confirmed via `query_filter_check.ipynb`'s lifestyle appendix (see that notebook for the full investigation):** the PPI vocabulary's own concept_ids for the frequency/quantity items (`Alcohol_DrinkFrequencyPastYear`/`Alcohol_AverageDailyDrinkCount`) turned out non-standard and entirely unpopulated in `observation_concept_id` -- same "Maps to" mismatch pattern as `hip_circumference`'s LOINC bug. The concept_ids below are what those actually map to (`FREQ_CONCEPT_ID`/`QUANTITY_CONCEPT_ID`), plus the binge item (`BINGE_CONCEPT_ID`), which was already standard. All 3 answers are `value_as_concept_id`-coded (a chosen answer-option concept), not plain numbers -- each item's answer options were verified directly against real answer-option counts to map cleanly onto the standard 0-4 AUDIT-C scale; `*_score_map` below encodes that lookup. Any answer not in a given map (`PMI: Skip`, `Don't know`, and a handful of stray legacy-vocabulary codes on the frequency item -- <0.01% of responses) scores `NA`. The composite (`phenotype`) is only defined when all 3 items are answered -- `NA` propagates through the sum by design, since a partial AUDIT-C score isn't a meaningful value.
+
+```{r derived-audit-c}
+FREQ_CONCEPT_ID <- 40771103      # "How often do you have a drink containing alcohol" -- AUDIT-C item 1
+QUANTITY_CONCEPT_ID <- 40771104  # "...how many standard drinks... on a typical day" -- AUDIT-C item 2
+BINGE_CONCEPT_ID <- 1586213      # "Alcohol: 6 or More Drinks Occurrence" -- AUDIT-C item 3
+
+# answer-concept -> standard 0-4 AUDIT-C item score; anything not listed (PMI: Skip,
+# Don't know, stray legacy codes) is absent from the map and scores NA below
+freq_score_map <- c(`45876662` = 0, `45879058` = 1, `45885058` = 2, `45877711` = 3, `45885059` = 4)
+quantity_score_map <- c(`45882591` = 0, `45883428` = 1, `45877926` = 2, `45877712` = 3, `45879059` = 4)
+binge_score_map <- c(`1585634` = 0, `45885060` = 1, `45879060` = 2, `45877713` = 3, `45879676` = 4)
+
+pull_audit_c_item <- function(concept_id, score_map, col_name) {
+  query <- sprintf("
+    SELECT
+      person_id,
+      value_as_concept_id,
+      ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY observation_date DESC) AS rn
+    FROM {CDR}.observation
+    WHERE observation_concept_id = %d
+  ", concept_id)
+
+  aou_sql(query) %>%
+    collect() %>%
+    filter(rn == 1) %>%
+    transmute(
+      person_id = as.character(person_id),
+      !!col_name := unname(score_map[as.character(value_as_concept_id)])
+    )
+}
+
+audit_c_demographics <- aou_sql(sprintf("
+  SELECT
+    person_id,
+    CAST(DATE_DIFF(DATE '%s', DATE(birth_datetime), YEAR) AS FLOAT64) AS age,
+    CASE
+      WHEN sex_at_birth_concept_id = 45878463 THEN 'Female'
+      WHEN sex_at_birth_concept_id = 45880669 THEN 'Male'
+      ELSE 'Other'
+    END AS sex_at_birth
+  FROM {CDR}.person
+", REFERENCE_DATE)) %>% collect() %>% mutate(person_id = as.character(person_id))
+
+audit_c_row <- pheno_list_all %>% filter(phenotype_name == "alcohol_audit_c_score")
+stopifnot(nrow(audit_c_row) == 1)
+
+audit_c_df <- pull_audit_c_item(FREQ_CONCEPT_ID, freq_score_map, "freq_score") %>%
+  full_join(pull_audit_c_item(QUANTITY_CONCEPT_ID, quantity_score_map, "quantity_score"), by = "person_id") %>%
+  full_join(pull_audit_c_item(BINGE_CONCEPT_ID, binge_score_map, "binge_score"), by = "person_id") %>%
+  mutate(phenotype = freq_score + quantity_score + binge_score) %>%   # NA propagates if any item is missing/unscored, by design
+  inner_join(audit_c_demographics, by = "person_id") %>%
+  filter(person_id %in% keep_ids)
+
+range_result <- filter_plausible_range(
+  audit_c_df, "phenotype", as.numeric(audit_c_row$plausible_min), as.numeric(audit_c_row$plausible_max)
+)
+audit_c_df <- range_result$data
+
+covars <- pull_covariates(keep_ids)
+audit_c_df <- audit_c_df %>%
+  select(person_id, phenotype, age, sex_at_birth) %>%
+  left_join(covars$pcs, by = "person_id") %>%
+  left_join(covars$zip3, by = "person_id") %>%
+  left_join(covars$ses, by = "person_id") %>%
+  add_transformed_variant("phenotype")
+
+write_tsv(audit_c_df, file.path(MODELING_TABLE_DIR, "alcohol_audit_c_score.tsv"))
+message(sprintf(
+  "alcohol_audit_c_score: %d excluded as implausible, %d written to %s",
+  range_result$n_excluded, nrow(audit_c_df), file.path(MODELING_TABLE_DIR, "alcohol_audit_c_score.tsv")
+))
 ```
 
 ## Run residualization
