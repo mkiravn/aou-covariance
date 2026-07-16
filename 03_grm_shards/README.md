@@ -42,3 +42,11 @@ interactive notebook's shared session; the ACAF `gs://` bucket URI and
 whether Controlled Tier VPC-SC rules permit a Batch worker to read it are
 both still open, to confirm before writing the `dsub` task script), GRM shard
 computation, `GRM-pairs/grm_bin_sharded` parallelization tuning.
+
+**Before running `grm_shard_tool` against `02_phenotype`'s `.pheno`
+output**: format is already checked and compatible (see
+`02_phenotype/README.md`'s "GRM-pairs compatibility" note) — the one open
+risk is that `grm_shard_tool`'s pheno lookup keys on the full `(FID, IID)`
+pair, and `write_grm_pheno()` sets `FID = IID = person_id`, while a plink
+`.grm.id` commonly has `FID = "0"` by default. Check the real `.grm.id`'s
+`FID` column once this stage produces one before trusting a run.

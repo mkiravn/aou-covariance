@@ -236,3 +236,30 @@ before any of that.
 
 **Not yet filled in**, needs the real workbench to pin down:
 - `survey` / `condition` phenotype sources (only `measurement` is wired up)
+- **Fitbit — revisit later.** `source == "fitbit"` isn't implemented, and
+  beyond that, `activity_summary`/`sleep_daily_summary` are one row per
+  person *per day* (`heart_rate_minute_level` per *minute*), so every
+  Fitbit candidate needs day-averaging before it fits `pull_phenotype()`'s
+  shape at all — open questions, not decided: minimum valid days required
+  per person, mean vs. median across days, and which date window. All 8
+  candidate rows and their design notes are in
+  `docs/candidate_phenotypes.tsv`; also unconfirmed which of the two table
+  variants (lowercase-with-`row_id` vs. `UPPERCASE`) is the live one.
+- **GRM-pairs compatibility** — checked, format is compatible:
+  `write_grm_pheno()`'s `FID IID Y` output matches `GRM-pairs/grm_bin_sharded`'s
+  `read_pheno_aligned()` exactly (space-separated, `FID`/`IID` header line
+  explicitly skipped, and it does its own `(FID, IID)` hash-map lookup
+  against `.grm.id` rather than requiring positional/row-order alignment
+  despite the README's "aligned to `.grm.id` order" phrasing — an
+  individual missing from the pheno file is treated the same as an
+  explicit `NA`, so `write_grm_pheno()` dropping NA rows entirely, rather
+  than writing literal `NA`, is fine). **One real risk, not yet verified**:
+  the lookup key is the *full* `(FID, IID)` pair, and `write_grm_pheno()`
+  sets `FID = IID = person_id` — if the real GRM's `.grm.id` (from
+  `03_grm_shards`) instead has `FID = "0"` (a common plink default when no
+  real family ID exists, which is the case here same as everywhere else
+  in this pipeline — see `01_ancestry_filtering`'s `--nonfounders` notes),
+  every row would silently fail to match despite `IID` being correct.
+  Check the real `.grm.id`'s `FID` column once `03_grm_shards` produces
+  one, before trusting a `grm_shard_tool` run against this pipeline's
+  `.pheno` output.
