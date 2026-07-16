@@ -92,6 +92,28 @@ got skipped) — `pull_phenotype()` also refuses to run on a non-numeric
 message instead of building `WHERE measurement_concept_id IN (UNCONFIRMED)`
 and failing deep inside BigQuery with an opaque `aou_sql()` error.
 
+`docs/candidate_phenotypes.tsv`: a curated wishlist for expanding beyond
+`phenotype_list.tsv`'s starter panel — same schema plus `expected_completeness`
+(qualitative — EHR labs ordered as part of routine panels like CBC/BMP/lipids
+are consistently high; anything survey- or wearable-sourced is lower, since
+only a self-selected subset of participants respond/share) and `approx_snp_h2`
+(rough published SNP-heritability, general-population GWAS/twin literature,
+*not* AoU-specific — for prioritization, not a claim about what this pipeline
+will actually find). Includes 9 new quantitative EHR labs (waist/hip
+circumference, heart rate, total cholesterol, creatinine, hemoglobin, WBC,
+platelets, ALT) chosen for high expected completeness (routine
+CBC/BMP/lipid-panel components), plus 3 Fitbit-derived phenotypes (resting
+heart rate, daily steps, sleep minutes) flagged `source == "fitbit"` —
+genuinely distinctive to AoU (longitudinal wearable data linked to WGS + EHR,
+not available at this scale in most public biobanks) but a real tradeoff
+against completeness, since only participants who shared Fitbit data are
+represented, and that `source` isn't wired up in `pull_phenotype()` yet (a
+different CDR schema entirely — `heart_rate_summary`/`activity_summary`/
+`sleep_daily_summary`, not the OMOP `measurement` table). Adopting a candidate
+means copying its row into `phenotype_list.tsv` after confirming the
+concept_id against the AoU Data Browser (or, for the Fitbit rows, after
+implementing that `pull_phenotype()` source).
+
 `plausible_min`/`plausible_max` columns (original units, e.g. cm for
 height, mg/dL for glucose): generous physiological-plausibility bounds,
 applied by `filter_plausible_range()` in `residualize_lib.R` before any
