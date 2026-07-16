@@ -23,7 +23,7 @@ QC'd and thinned pgen sets (plus their `.log`s, which carry the exact filter
 counts) get copied from local scratch to `data/03_grm_shards/` in the bucket
 at the end — local scratch isn't guaranteed to survive a session restart.
 
-`notebooks/remote/genome_wide_qc_thinning.ipynb`: all 22 autosomes, same QC +
+`notebooks/remote/genome_wide_qc_thinning_merge.ipynb`: all 22 autosomes, same QC +
 `--thin 0.2` (chr22's calibrated value, fixed rather than recomputed per
 chromosome), run interactively rather than as submitted jobs — a fully serial
 22-chromosome run extrapolates from chr22's ~10 min QC time to ~9.4 hours, so
@@ -34,7 +34,11 @@ timing/counts and the effective speedup vs. a naive serial estimate — a
 speedup well below `N_CONCURRENT` means the shared network-mounted ACAF reads
 are contending across concurrent chromosomes, which argues for moving to job
 submission (below) rather than pushing concurrency higher in a single
-session.
+session. Once all 22 are done, a final section merges the per-chromosome
+pfiles into one genome-wide panel (`plink2 --pmerge-list`) and exports a
+PLINK1 bed/bim/fam copy alongside it — `GRM-pairs/grm_bin_sharded`'s
+row-range recovery is calibrated to PLINK 1.9's `--parallel` split
+algorithm specifically, and PLINK 1.9 doesn't read pgen.
 
 **Not yet started**: job submission (`dsub`, one Google Batch task per
 chromosome — each gets its own machine and network path, unlike the
