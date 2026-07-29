@@ -128,6 +128,7 @@ prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_c
       range_diagnostics[[name]] <- tibble(
         phenotype = name, n_input = NA_integer_,
         n_excluded_implausible = NA_integer_, n_after_range_filter = NA_integer_,
+        n_after_keep_list = NA_integer_,
         status = "skipped: pull_phenotype() failed"
       )
       next
@@ -137,10 +138,21 @@ prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_c
       pheno_df, "phenotype", as.numeric(row$plausible_min), as.numeric(row$plausible_max)
     )
     pheno_df <- range_result$data
+
+    # restrict to the ancestry-filtered analysis cohort BEFORE writing anything out --
+    # the covariate joins below are left_join()s (pheno_df is the left side), so without
+    # this, everyone outside keep_ids would still survive into table_dir's persisted TSV
+    # (just with NA covariates), and into the "base" covariate-set's exported .pheno file
+    # specifically, since its only covariate (age) is populated for the unrestricted
+    # population too and lm() only drops rows missing a *required* covariate
+    n_before_keep_list <- nrow(pheno_df)
+    pheno_df <- pheno_df %>% filter(person_id %in% keep_ids)
+
     range_diagnostics[[name]] <- tibble(
       phenotype = name, n_input = range_result$n_input,
       n_excluded_implausible = range_result$n_excluded,
-      n_after_range_filter = nrow(pheno_df),
+      n_after_range_filter = n_before_keep_list,
+      n_after_keep_list = nrow(pheno_df),
       status = "ok"
     )
 
