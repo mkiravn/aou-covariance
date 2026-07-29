@@ -54,3 +54,14 @@ risk is that `grm_shard_tool`'s pheno lookup keys on the full `(FID, IID)`
 pair, and `write_grm_pheno()` sets `FID = IID = person_id`, while a plink
 `.grm.id` commonly has `FID = "0"` by default. Check the real `.grm.id`'s
 `FID` column once this stage produces one before trusting a run.
+
+`notebooks/remote/king_po_exclusion.ipynb`: full-sib (FS) and
+parent-offspring (PO) pairs share the same expected additive relatedness
+(`a_ij ~= 0.5`), so the GRM alone can't tell them apart — they land in the
+same bin. Runs [KING](https://www.kingrelatedness.com/)'s `--related`
+mode (kinship + IBS0, auto-classified `InfType`) on a further-thinned copy
+of the genome-wide merged panel (kinship/IBS0 estimation only needs tens
+of thousands of independent SNPs, not the full ~1M-variant GRM panel) to
+split the `a_ij ~= 0.5` band into PO vs FS and write a PO-pair exclusion
+list. **Not yet wired into `grm_shard_tool accumulate`** — that would need
+a `--exclude-pairs` option added there; see the notebook's last section.
