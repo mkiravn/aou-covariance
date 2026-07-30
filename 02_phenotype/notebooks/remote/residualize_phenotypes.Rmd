@@ -62,8 +62,13 @@ Phenotype list TSV schema (`PHENO_LIST_PATH`):
 
 ```{r inputs}
 WORKSPACE_BUCKET <- path.expand("~/workspace/Data from All of Us Controlled Tier /shared-env-pilot")
-ANCESTRY_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, "data", "01_ancestry_filtering")
-PHENOTYPE_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, "data", "02_phenotype")
+
+# Must match whatever CDR_VERSION 01_ancestry_filtering's notebooks were
+# actually run with -- this pipeline stage reads their output.
+CDR_VERSION <- "v9"
+
+ANCESTRY_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, CDR_VERSION, "01_ancestry_filtering")
+PHENOTYPE_BUCKET_DIR <- file.path(WORKSPACE_BUCKET, CDR_VERSION, "02_phenotype")
 
 # round 2b: AoU-fit ellipsoid, provisional cross-check (reverse_pca_aou.ipynb) -- see
 # query_filter_check.ipynb's Inputs chunk for the round 2 (1000G-fit, default) alternative
