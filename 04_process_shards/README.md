@@ -3,7 +3,7 @@
 Bin each GRM shard by relatedness and accumulate phenotype cross-products
 using `GRM-pairs/grm_bin_sharded` (`accumulate`, then `merge`).
 
-`notebooks/remote/grm_shard_processing.ipynb`: shells out to
+`notebooks/remote/01_grm_shard_processing.ipynb`: shells out to
 `grm_shard_tool` (a C++ CLI, not a Python library) to bin the sharded GRM
 by relatedness and compute the phenotype cross-product (covariance)
 within each bin, producing a covariance-vs-relatedness plot per chosen

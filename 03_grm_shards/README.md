@@ -3,7 +3,7 @@
 Compute the GRM in row-chunked shards (`plink --make-grm-bin --parallel k n`)
 as AoU batch jobs, store shards in the workspace bucket.
 
-`notebooks/remote/chr22_qc_thinning_timing.ipynb`: first look before committing
+`notebooks/remote/00_optional_chr22_qc_thinning_timing.ipynb`: first look before committing
 to a genome-wide run — QC (min MAF 1%, HWE 1e-6, missingness < 5%, biallelic
 only) on ACAF's chr22, restricted to round 2b's ancestry-filtered keep-list,
 then random thinning (`plink2 --thin`) tuned toward a ~1M-variant genome-wide
@@ -23,7 +23,7 @@ QC'd and thinned pgen sets (plus their `.log`s, which carry the exact filter
 counts) get copied from local scratch to `data/03_grm_shards/` in the bucket
 at the end — local scratch isn't guaranteed to survive a session restart.
 
-`notebooks/remote/genome_wide_qc_thinning_merge.ipynb`: all 22 autosomes, same QC +
+`notebooks/remote/03_genome_wide_qc_thinning_merge.ipynb`: all 22 autosomes, same QC +
 `--thin 0.2` (chr22's calibrated value, fixed rather than recomputed per
 chromosome), run interactively rather than as submitted jobs — a fully serial
 22-chromosome run extrapolates from chr22's ~10 min QC time to ~9.4 hours, so
@@ -55,7 +55,7 @@ pair, and `write_grm_pheno()` sets `FID = IID = person_id`, while a plink
 `.grm.id` commonly has `FID = "0"` by default. Check the real `.grm.id`'s
 `FID` column once this stage produces one before trusting a run.
 
-`notebooks/remote/king_po_exclusion.ipynb`: full-sib (FS) and
+`notebooks/remote/01_king_po_exclusion.ipynb`: full-sib (FS) and
 parent-offspring (PO) pairs share the same expected additive relatedness
 (`a_ij ~= 0.5`), so the GRM alone can't tell them apart — they land in the
 same bin. Runs [KING](https://www.kingrelatedness.com/)'s `--related`

@@ -4,7 +4,7 @@ Download phenotypes/covariates from AoU, normalize (trim implausible
 values → Kemper et al. 2021 style: residualize → trim outliers →
 standardize within sex — see main README for background).
 
-`notebooks/remote/query_filter_check.ipynb`: a smaller smoke test to run
+`notebooks/remote/01_query_filter_check.ipynb`: a smaller smoke test to run
 first, against the real CDR, before trusting the full pipeline below — pulls
 just the 3 fully-confirmed phenotypes from `docs/phenotype_list.tsv` (no
 `UNCONFIRMED` lipid rows) and checks concept_id validity, pull row/person
@@ -12,14 +12,14 @@ counts, the keep-list filtering funnel, sex_at_birth breakdown, and value
 ranges. Every cell prints aggregate counts/summary stats only, never a
 person-level row. Connects via `allofus::aou_connect()` / `aou_sql()`, same
 as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
-practice. Reads `final_pca.ipynb`'s (`01_ancestry_filtering`) keep-list and
-PC covariates for whichever `SAMPLE_SET` is selected — self-referential
-Mahalanobis filtering on AoU's own premade ancestry label, no 1000G
-reference projection. Step 5 runs `residualize_lib.R`'s real
-`run_residualization()` — the same function `residualize_phenotypes.ipynb`
+practice. Reads `04_round2_1000g_filter.ipynb`'s keep-list and `05_final_pca.ipynb`'s
+PC covariates (both `01_ancestry_filtering`) for whichever `SAMPLE_SET` is
+selected — AoU's own premade ancestry label as the base cohort, refined by
+a genuine 1000G-referenced Mahalanobis filter. Step 5 runs `residualize_lib.R`'s real
+`run_residualization()` — the same function `02_residualize_phenotypes.ipynb`
 calls, wrapped around the data already pulled in earlier steps instead of
 issuing new BigQuery calls — across all 4 covariate-set combos (`PC1..PC5`
-for PCs; `final_pca.ipynb`'s file has 10, only the top 5 are used, since
+for PCs; `05_final_pca.ipynb`'s file has 10, only the top 5 are used, since
 beyond that isn't considered informative for this cohort) crossed with
 `{raw, invnorm}`, exercising the pipeline's actual statistical step against
 real AoU values, not just synthetic data like
@@ -37,7 +37,7 @@ possible zip3 coefficients), and reports phenotype distributions
 by-sex boxplots) — still model-level/aggregate output only, never a
 person-level row.
 
-`notebooks/remote/residualize_phenotypes.ipynb`: takes `final_pca.ipynb`'s
+`notebooks/remote/02_residualize_phenotypes.ipynb`: takes `05_final_pca.ipynb`'s
 ancestry-filtered keep-list and PC covariates (`01_ancestry_filtering`) and
 a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
 (matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per
@@ -71,7 +71,7 @@ retuning the residualization procedure itself (`covariate_sets`,
 re-pulling from BigQuery. `run_residualization()` still exists as a
 convenience wrapper that calls both stages back-to-back (writing tables to
 an ephemeral `tempfile()` dir) — what `test_residualize_fake_data.ipynb`
-and `query_filter_check.ipynb`'s smoke tests use, since they don't need the
+and `01_query_filter_check.ipynb`'s smoke tests use, since they don't need the
 tables to persist.
 
 `notebooks/remote/phenotype_exploration.ipynb`: exploratory data science over
@@ -102,7 +102,7 @@ than actively pursued further. These are all public, standard vocabulary
 identifiers describing *which* concepts to pull — not participant data,
 fine to have in git.
 
-`residualize_phenotypes.ipynb`/`.Rmd` filter `UNCONFIRMED` rows out of
+`02_residualize_phenotypes.ipynb`/`.Rmd` filter `UNCONFIRMED` rows out of
 `pheno_list` right after reading it (with a `message()` naming which ones
 got skipped) — `pull_phenotype()` also refuses to run on a non-numeric
 `concept_id` as a second line of defense, so a bad row fails with a clear
@@ -182,7 +182,7 @@ concept_ids (`waist,hip`), and it's not a single pulled value but
 `waist_circumference / hip_circumference` for the same person.
 `pull_phenotype()` still throws on it (unimplemented source, caught and
 skipped like any other bad row) — it's built instead as its own cell in
-`residualize_phenotypes.ipynb`/`.Rmd`, "Derived phenotype: waist/hip
+`02_residualize_phenotypes.ipynb`/`.Rmd`, "Derived phenotype: waist/hip
 ratio", which combines the already-prepared `waist_circumference.tsv`/
 `hip_circumference.tsv` modeling tables (no new BigQuery calls) rather
 than pulling fresh. **Caveat carried into that cell's markdown too:**
@@ -228,7 +228,7 @@ Every numeric covariate pulled from BigQuery (`age`, `median_income`,
 SQL. Bare `INT64` columns collect via `bigrquery`/`allofus` as
 `bit64::integer64`, not a plain double, and `lm()` silently mis-coerces
 that into a degenerate fit (`r_squared = NaN`, everything trimmed as an
-outlier) rather than erroring — caught by `query_filter_check.ipynb`'s
+outlier) rather than erroring — caught by `01_query_filter_check.ipynb`'s
 mock residualization step on `age`, fixed the same way everywhere else a
 raw `INT64` covariate is pulled in.
 
