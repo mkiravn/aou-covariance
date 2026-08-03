@@ -12,14 +12,14 @@ counts, the keep-list filtering funnel, sex_at_birth breakdown, and value
 ranges. Every cell prints aggregate counts/summary stats only, never a
 person-level row. Connects via `allofus::aou_connect()` / `aou_sql()`, same
 as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
-practice. Reads both round 2 (`round2_filter.ipynb`, 1000G-fit ellipsoid,
-the default) and round 2b (`reverse_pca_aou.ipynb`, AoU-fit ellipsoid,
-provisional) keep-lists, so either can be checked against — flip
-`KEEP_LIST_PATH` to compare. Step 5 runs `residualize_lib.R`'s real
+practice. Reads `final_pca.ipynb`'s (`01_ancestry_filtering`) keep-list and
+PC covariates for whichever `SAMPLE_SET` is selected — self-referential
+Mahalanobis filtering on AoU's own premade ancestry label, no 1000G
+reference projection. Step 5 runs `residualize_lib.R`'s real
 `run_residualization()` — the same function `residualize_phenotypes.ipynb`
 calls, wrapped around the data already pulled in earlier steps instead of
-issuing new BigQuery calls — across all 4 covariate-set combos (round 2b's
-`PC1..PC5` for PCs; round 2b's file has 20, only the top 5 are used, since
+issuing new BigQuery calls — across all 4 covariate-set combos (`PC1..PC5`
+for PCs; `final_pca.ipynb`'s file has 10, only the top 5 are used, since
 beyond that isn't considered informative for this cohort) crossed with
 `{raw, invnorm}`, exercising the pipeline's actual statistical step against
 real AoU values, not just synthetic data like
@@ -37,9 +37,8 @@ possible zip3 coefficients), and reports phenotype distributions
 by-sex boxplots) — still model-level/aggregate output only, never a
 person-level row.
 
-`notebooks/remote/residualize_phenotypes.ipynb` (IRkernel) /
-`residualize_phenotypes.Rmd` (R Markdown, identical content, pick whichever
-your environment prefers): takes round 2's ancestry-filtered keep-list and
+`notebooks/remote/residualize_phenotypes.ipynb`: takes `final_pca.ipynb`'s
+ancestry-filtered keep-list and PC covariates (`01_ancestry_filtering`) and
 a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
 (matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per
 combination of:
