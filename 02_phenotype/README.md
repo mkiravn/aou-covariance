@@ -12,14 +12,14 @@ counts, the keep-list filtering funnel, sex_at_birth breakdown, and value
 ranges. Every cell prints aggregate counts/summary stats only, never a
 person-level row. Connects via `allofus::aou_connect()` / `aou_sql()`, same
 as the main pipeline below — confirmed working on Workbench 2.0 (Verily) in
-practice. Reads `05_round2_1000g_filter.ipynb`'s keep-list and `06_final_pca.ipynb`'s
+practice. Reads `03_round2_1000g_filter.ipynb`'s keep-list and `04_final_pca.ipynb`'s
 PC covariates (both `01_ancestry_filtering`) for whichever `SAMPLE_SET` is
 selected — AoU's own premade ancestry label as the base cohort, refined by
 a genuine 1000G-referenced Mahalanobis filter. Step 5 runs `residualize_lib.R`'s real
 `run_residualization()` — the same function `02_residualize_phenotypes.ipynb`
 calls, wrapped around the data already pulled in earlier steps instead of
 issuing new BigQuery calls — across all 4 covariate-set combos (`PC1..PC5`
-for PCs; `06_final_pca.ipynb`'s file has 10, only the top 5 are used, since
+for PCs; `04_final_pca.ipynb`'s file has 10, only the top 5 are used, since
 beyond that isn't considered informative for this cohort) crossed with
 `{raw, invnorm}`, exercising the pipeline's actual statistical step against
 real AoU values, not just synthetic data like
@@ -37,7 +37,7 @@ possible zip3 coefficients), and reports phenotype distributions
 by-sex boxplots) — still model-level/aggregate output only, never a
 person-level row.
 
-`notebooks/remote/02_residualize_phenotypes.ipynb`: takes `06_final_pca.ipynb`'s
+`notebooks/remote/02_residualize_phenotypes.ipynb`: takes `04_final_pca.ipynb`'s
 ancestry-filtered keep-list and PC covariates (`01_ancestry_filtering`) and
 a phenotype list TSV, and for every phenotype exports one `FID IID Y` file
 (matching `GRM-pairs/full_grm_bin/prep_pheno.R`'s expected format) per
