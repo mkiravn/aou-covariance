@@ -3,12 +3,6 @@
 Compute the GRM in row-chunked shards (`plink --make-grm-bin --parallel k n`)
 as AoU batch jobs, store shards in the workspace bucket.
 
-`notebooks/remote/00_optional_chr22_qc_thinning_timing.ipynb`: first look before committing
-to a genome-wide run — QC (min MAF 1%, HWE 1e-6, missingness < 5%, biallelic
-only) on ACAF's chr22, restricted to round 2b's ancestry-filtered keep-list,
-then random thinning (`plink2 --thin`) tuned toward a ~1M-variant genome-wide
-target.
-
 ACAF's pvar ships with the variant ID column unset (`.` for every variant), so
 `--rm-dup` has nothing to compare IDs against unless `--set-all-var-ids
 '@:#:$r:$a'` runs first (same convention as `submit_pca_r1.ipynb`'s ACAF
