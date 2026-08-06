@@ -17,7 +17,7 @@ QC'd and thinned pgen sets (plus their `.log`s, which carry the exact filter
 counts) get copied from local scratch to `data/03_grm_shards/` in the bucket
 at the end — local scratch isn't guaranteed to survive a session restart.
 
-`notebooks/remote/02_genome_wide_qc_thinning_batch_submit.ipynb`: all 22 autosomes, same QC +
+`notebooks/remote/03_genome_wide_qc_thinning_batch_submit.ipynb`: all 22 autosomes, same QC +
 `--thin 0.2` (chr22's calibrated value, fixed rather than recomputed per
 chromosome), run interactively rather than as submitted jobs — a fully serial
 22-chromosome run extrapolates from chr22's ~10 min QC time to ~9.4 hours, so
