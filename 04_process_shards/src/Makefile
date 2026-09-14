@@ -17,6 +17,7 @@ $(BIN): grm_class_tool.cpp
 
 test: $(BIN)
 	./test/run_test.sh
+	python3 test/test_he_estimators.py
 
 clean:
 	rm -f $(BIN)
