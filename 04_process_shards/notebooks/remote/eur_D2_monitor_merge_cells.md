@@ -152,28 +152,34 @@ print(view[["phenotype", "h2_unrel", "PO_n", "PO_excess", "FS_n", "FS_excess"]]
 
 ## Cell 5 — plot every merged phenotype
 
-One figure per phenotype: a 2 × 4 grid of its models (transform × covariate
-set), each panel showing `other` / `PO` / `FS` against the additive prediction
-fitted on that model's own unrelated region.
+One figure per phenotype, one panel per transform, with all four covariate
+sets overlaid. Colour encodes the covariate set (light → dark follows the
+nested staircase `base` → `+PCs` → `+zip3` → `+SES`); marker encodes the pair
+class. Error bars are deliberately faint — with four models overlaid they are
+context, not the message.
 
-Reading across a row shows what adding covariates does to the slope; comparing
-rows shows raw against rank-inverse-normal. Panels share a y-axis within a
-phenotype so they are directly comparable.
+The comparison to read is whether the PO and FS markers move relative to their
+own dashed additive line as covariates are added. If the FS excess shrinks once
+zip3 and SES enter, part of what looked like shared sibling environment was
+geography and socioeconomic confounding.
 
 ```python
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 MIN_N = 20
 COVSETS    = ["base", "base_pcs", "base_pcs_zip3", "base_pcs_zip3_ses"]
 TRANSFORMS = ["raw", "invnorm"]
-COL = {"other": "#4C78A8", "FS": "#F58518", "PO": "#E45756"}
+XLIM = (-0.06, 1.12)
+
+CSCOL = {cs: plt.cm.viridis(v) for cs, v in zip(COVSETS, np.linspace(0.15, 0.85, len(COVSETS)))}
+MARK  = {"other": ("o", 2.5), "PO": ("^", 7.0), "FS": ("s", 7.0)}
 
 by_pheno = defaultdict(dict)
 for tag in all_merged:
     parts = tag.split("__")
     if len(parts) >= 3:
         by_pheno[parts[0]][(parts[1], parts[2])] = tag
-
 print(f"{len(by_pheno)} phenotypes merged\n")
 
 
@@ -188,59 +194,64 @@ def load(tag):
 
 
 for pheno in sorted(by_pheno):
-    models_p = by_pheno[pheno]
-    loaded = {k: load(t) for k, t in models_p.items()}
-    loaded = {k: v for k, v in loaded.items() if v[0] is not None}
+    loaded = {k: v for k, v in ((k, load(t)) for k, t in by_pheno[pheno].items())
+              if v[0] is not None}
     if not loaded:
         continue
 
-    # common y-limits across the phenotype's panels
     vals = np.concatenate([d[d.full_n >= MIN_N].full_mean.values for d, _, _ in loaded.values()])
     pad = 0.08 * (np.nanmax(vals) - np.nanmin(vals) or 1)
     ylim = (np.nanmin(vals) - pad, np.nanmax(vals) + pad)
 
-    fig, axes = plt.subplots(len(TRANSFORMS), len(COVSETS),
-                             figsize=(21, 8.5), sharex=True, sharey=True)
-    for r, tf in enumerate(TRANSFORMS):
-        for c, cs in enumerate(COVSETS):
-            ax = axes[r, c]
+    fig, axes = plt.subplots(1, len(TRANSFORMS), figsize=(17, 6),
+                             sharex=True, sharey=True)
+    slopes = {}
+
+    for ax, tf in zip(np.atleast_1d(axes), TRANSFORMS):
+        for cs in COVSETS:
             got = loaded.get((tf, cs))
             if got is None:
-                ax.text(.5, .5, "not merged", ha="center", va="center",
-                        transform=ax.transAxes, color="grey", fontsize=9)
-                ax.set_xticks([]); ax.set_yticks([])
                 continue
             t, slope, icept = got
+            slopes[(tf, cs)] = slope
+            col = CSCOL[cs]
             d = t[t.full_n >= MIN_N]
 
-            for cls, col in COL.items():
+            for cls, (mk, ms) in MARK.items():
                 s = d[d["class"] == cls]
-                if len(s):
-                    ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt="o",
-                                ms=2.5 if cls == "other" else 7, lw=.7, capsize=1.5,
-                                color=col, zorder=1 if cls == "other" else 3,
-                                label=f"{cls} ({int(s.full_n.sum()):,})")
-            xs = np.array([t.bin_midpoint.min(), t.bin_midpoint.max()])
-            ax.plot(xs, icept + slope * xs, "k--", lw=1, zorder=2)
-            ax.axhline(0, color="grey", lw=.4)
-            ax.axvline(0.5, color="grey", lw=.4, ls=":")
-            ax.set_ylim(*ylim)
+                if not len(s):
+                    continue
+                ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se,
+                            fmt=mk, ms=ms, color=col,
+                            lw=0, elinewidth=0.6, capsize=0, ecolor=col,
+                            alpha=0.45 if cls == "other" else 0.95,
+                            mec="none" if cls == "other" else "0.25", mew=0.5,
+                            zorder=2 if cls == "other" else 4)
 
-            n_po = int(d[d["class"] == "PO"].full_n.sum())
-            n_fs = int(d[d["class"] == "FS"].full_n.sum())
-            ax.set_title(f"{cs}" if r == 0 else "", fontsize=10)
-            ax.text(.03, .96, f"slope {slope:.3f}\nPO {n_po}  FS {n_fs}",
-                    transform=ax.transAxes, va="top", fontsize=8,
-                    bbox=dict(fc="white", ec="none", alpha=.7))
-            if c == 0:
-                ax.set_ylabel(f"{tf}\n" + r"mean $y_i y_j$", fontsize=9)
-            if r == len(TRANSFORMS) - 1:
-                ax.set_xlabel(r"$a_{ij}$")
-            if r == 0 and c == len(COVSETS) - 1:
-                ax.legend(fontsize=7, loc="lower right")
+            xs = np.array(XLIM)
+            ax.plot(xs, icept + slope * xs, "--", lw=1, color=col, alpha=0.7, zorder=3)
 
-    fig.suptitle(f"{pheno} — binned cross-products by pair class "
-                 f"(bins with n$\\geq${MIN_N}; dashed = additive prediction)", y=1.00)
+        ax.axhline(0, color="grey", lw=.4)
+        ax.axvline(0.5, color="grey", lw=.4, ls=":")
+        ax.set_xlim(*XLIM); ax.set_ylim(*ylim)
+        ax.set_xlabel(r"GRM relatedness  $a_{ij}$")
+        ax.set_title(tf)
+    np.atleast_1d(axes)[0].set_ylabel(r"mean phenotype cross-product  $\overline{y_i y_j}$")
+
+    cov_handles = [Line2D([], [], color=CSCOL[cs], lw=3,
+                          label=f"{cs}  (slope {slopes.get((TRANSFORMS[-1], cs), float('nan')):.3f})")
+                   for cs in COVSETS if any((tf, cs) in slopes for tf in TRANSFORMS)]
+    cls_handles = [Line2D([], [], color="0.35", lw=0, marker=mk, ms=ms if cls != "other" else 5,
+                          label=cls) for cls, (mk, ms) in MARK.items()]
+    leg1 = np.atleast_1d(axes)[0].legend(handles=cov_handles, fontsize=8,
+                                         loc="upper left", title="covariate set",
+                                         title_fontsize=8, framealpha=.9)
+    np.atleast_1d(axes)[0].add_artist(leg1)
+    np.atleast_1d(axes)[-1].legend(handles=cls_handles, fontsize=8, loc="upper left",
+                                   title="pair class", title_fontsize=8, framealpha=.9)
+
+    fig.suptitle(f"{pheno} — bins with n$\\geq${MIN_N}; dashed = additive prediction "
+                 "fitted on each model's own unrelated region", y=1.00)
     plt.tight_layout()
     plt.savefig(f"{WORK}/plots/{pheno}_models.png", dpi=110, bbox_inches="tight")
     plt.show()
