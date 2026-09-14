@@ -1,350 +1,381 @@
-# Binned phenotype cross-products — eur_D2 (single-phenotype test)
+# Binned phenotype cross-products — eur_D2
 
-Runs `grm_shard_tool accumulate` + `merge` over the 16 eur_D2 Batch shards for
-**one** `(phenotype, transform, covariate_set)` combo, to validate the whole
-chain end-to-end before committing to the full phenotype list.
+Runs `grm_class_tool` over the 16 eur_D2 shards for every residualized
+phenotype, keeping PO and FS pairs in their own bin sets.
 
-Nothing has been accumulated for eur_D2 yet, so this is a clean start — no
-stale `.acc.tsv` files to invalidate.
+Batched by phenotype: one invocation per (phenotype, shard) covers that
+phenotype's 8 models (2 transforms × 4 covariate sets) in a single pass, since
+the 4-byte read, the bin lookup and the pair-class cursor are shared across
+them. 576 invocations for all 288 models, ~2 h at 32-way concurrency.
 
-**eur_D2 actuals**: N = 221,992; 24,640,335,028 GRM entries = 91.8 GiB across
-16 shards of 5.74 GiB. A numpy scan of one shard took ~59 s, so expect roughly
-**10–20 min** for one combo across all 16 shards.
+**eur_D2 actuals**: N = 221,992; 24,640,335,028 entries = 91.8 GiB across 16
+shards of 5.74 GiB; 8,887 classified 1st-degree pairs; 153 bins (`--wide`).
 
-Filenames carry an `EXCL_TAG` so that a later PO-exclusion-aware run writes to
-different paths instead of silently reusing these accumulators.
+No FID alignment step is needed — `grm_class_tool` keys on IID alone, so it
+reads the residualized `.pheno` files straight from the bucket.
 
 Run cells in order.
 
 ---
 
-## Cell 1 — build the tool
+## Cell 1 — pull, build, verify the binary
 
 ```python
-import os
-import subprocess
+import os, subprocess
 
-REPO_DIR = os.path.expanduser("~/repos/aou-covariance")
-TOOL_DIR = f"{REPO_DIR}/GRM-pairs/grm_bin_sharded"
-TOOL_BIN = f"{TOOL_DIR}/grm_shard_tool"
+REPO = os.path.expanduser("~/repos/AOU-covariance")
+SRC  = f"{REPO}/04_process_shards/src/grm_class_tool"
 
-subprocess.run(["make"], cwd=TOOL_DIR, check=True)
-assert os.path.isfile(TOOL_BIN), f"missing {TOOL_BIN}"
-print("tool:", TOOL_BIN)
+subprocess.run(["git", "pull"], cwd=REPO, check=True)
+subprocess.run(["make"], cwd=f"{REPO}/04_process_shards/src", check=True)
+
+probe = subprocess.run([SRC, "accumulate"], capture_output=True, text=True)
+assert "--pheno-list" in probe.stderr, \
+    "stale binary -- multi-phenotype support missing; check git pull && make"
+print("binary OK\n")
+print(probe.stderr.strip())
 ```
 
-## Cell 2 — paths
+A stale binary fails in argument parsing after 0.2 s, 576 times over. Check it
+once instead.
+
+## Cell 2 — config
 
 ```python
-WORKSPACE_BUCKET = os.path.expanduser(
+SHARDS  = os.path.expanduser("~/scratch_grm/shards")
+CLASSES = os.path.expanduser("~/scratch_grm/relatedness_screen/deg1_classified.tsv")
+BINS    = os.path.expanduser("~/bins/bins_wide.txt")
+WORK    = os.path.expanduser("~/grm_pheno_cov_eur_D2")
+PHENO_DIR = os.path.expanduser(
     "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot"
-)
-PROJECT_DIR = "phenotypic_covariance_v9"
-SAMPLE_SET = "eur_D2"
-N_SHARDS = 16
+    "/phenotypic_covariance_v9/02_phenotype/eur_D2/residualized")
+BUCKET_DIR_GS = ("gs://cloned-shared-env-pilot-wb-swift-sprout-7231"
+                 "/phenotypic_covariance_v9/03_grm_shards/eur_D2")
 
-BUCKET_DIR = f"{WORKSPACE_BUCKET}/{PROJECT_DIR}/03_grm_shards/{SAMPLE_SET}"
-SHARDS_DIR = f"{BUCKET_DIR}/shards"
-GRM_ID = f"{SHARDS_DIR}/grm_shard_1_of_{N_SHARDS}.grm.id"
+N_IDS, N_SHARDS = 221992, 16
+N_CONCURRENT, NBLOCKS, SEED = 32, 50, 1
 
-PHENO_DIR = (f"{WORKSPACE_BUCKET}/{PROJECT_DIR}/02_phenotype/{SAMPLE_SET}/residualized")
+# In every accumulator filename: the accumulator stores bin INDICES, not edges,
+# so merging a 153-bin accumulator against a 236-bin file would silently
+# attribute sums to the wrong relatedness. Same for the classification.
+BIN_TAG, CLASS_TAG = "wide", "deg1"
 
-BINS_FILE = f"{REPO_DIR}/GRM-pairs/full_grm_bin/bins.txt"
-NBLOCKS = 50
-SEED = 1
+GRM_ID = f"{SHARDS}/grm_shard_1_of_{N_SHARDS}.grm.id"
+for d in ("logs", "lists", "plots"):
+    os.makedirs(f"{WORK}/{d}", exist_ok=True)
 
-# No pair exclusion applied yet. Bump this when a PO-exclusion list is wired
-# in, so those runs write to separate files rather than reusing these.
-EXCL_TAG = "noexcl"
-
-WORK_DIR = os.path.expanduser(f"~/grm_pheno_cov_{SAMPLE_SET}")
-PLOTS_DIR = f"{WORK_DIR}/plots"
-os.makedirs(WORK_DIR, exist_ok=True)
-os.makedirs(PLOTS_DIR, exist_ok=True)
-
-print(f"shards : {SHARDS_DIR}")
-print(f"pheno  : {PHENO_DIR}")
-print(f"work   : {WORK_DIR}")
+print(f"shards {SHARDS}\nwork   {WORK}\ntags   {CLASS_TAG}/{BIN_TAG}")
 ```
 
-## Cell 3 — verify inputs
+## Cell 3 — verify the shards
+
+`gcloud storage cp` does not fail loudly on a partial object, and a truncated
+shard is not detectable by eye — sizes differ by a few hundred MB out of 5.8 GB.
+GRM shard sizes are exactly computable, so check rather than assume.
+
+```python
+import math
+
+def _tdo(t):
+    if t == 0: return 1
+    v = int(math.sqrt(t)) + 2
+    while v > 1 and (v-1)*(v-2) >= t: v -= 1
+    while v*(v-1) < t: v += 1
+    return v
+
+def row_start(idx):                       # idx is 0-based
+    v = _tdo((N_IDS * (N_IDS - 1) * idx) // N_SHARDS)
+    return 0 if v == 1 else v
+
+C = lambda i: i * (i + 1) // 2
+
+bad = []
+print(f"{'shard':>5}  {'rows':>20}  {'expected':>15}  {'actual':>15}")
+for k in range(1, N_SHARDS + 1):
+    a = row_start(k - 1)
+    b = N_IDS if k == N_SHARDS else row_start(k)
+    exp = (C(b) - C(a)) * 4
+    p = f"{SHARDS}/grm_shard_{k}_of_{N_SHARDS}.grm.bin.{k}"
+    act = os.path.getsize(p) if os.path.isfile(p) else -1
+    if act != exp:
+        bad.append(k)
+    print(f"{k:>5}  [{a:>6}, {b:>6})  {exp:>15,}  {act:>15,}  "
+          f"{'OK' if act == exp else 'BAD %+d' % (act - exp)}")
+
+for f in (GRM_ID, BINS, CLASSES):
+    print(f"{'OK  ' if os.path.isfile(f) else 'MISS'} {f}")
+
+assert not bad, f"re-copy these shards: {bad}"
+print("\nall shards verified")
+```
+
+If any are BAD, re-copy only those:
+
+```bash
+%%bash
+GS="gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/03_grm_shards/eur_D2/shards"
+DEST=~/scratch_grm/shards
+for k in 1 6; do          # <-- the bad shard numbers
+  rm -f "$DEST/grm_shard_${k}_of_16.grm.bin.${k}"
+  gcloud storage cp "$GS/grm_shard_${k}_of_16.grm.bin.${k}" "$DEST/"
+done
+```
+
+## Cell 4 — discover phenotypes and write per-phenotype lists
+
+```python
+from collections import defaultdict
+
+models = defaultdict(list)
+for f in sorted(os.listdir(PHENO_DIR)):
+    if f.endswith(".pheno"):
+        stem = f[:-len(".pheno")]
+        models[stem.rsplit("__", 2)[0]].append(stem)
+models = dict(sorted(models.items()))
+
+n_models = sum(len(v) for v in models.values())
+print(f"{len(models)} phenotypes, {n_models} models "
+      f"({n_models // max(1, len(models))} per phenotype)\n")
+for p in list(models)[:5]:
+    print(f"  {p}: {[m.split('__', 1)[1] for m in models[p]]}")
+
+for pheno, combos in models.items():
+    with open(f"{WORK}/lists/{pheno}.tsv", "w") as f:
+        for c in combos:
+            f.write(f"{c}__{CLASS_TAG}__{BIN_TAG}\t{PHENO_DIR}/{c}.pheno\n")
+print(f"\nwrote {len(models)} list files to {WORK}/lists/")
+```
+
+To run a subset, filter `models` here — e.g. keep only `invnorm__base_pcs`:
+
+```python
+# models = {p: [m for m in ms if m.endswith("__invnorm__base_pcs")]
+#           for p, ms in models.items()}
+# models = {p: ms for p, ms in models.items() if ms}
+```
+
+## Cell 5 — accumulate
+
+```python
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def acc_path(combo, k):
+    return f"{WORK}/{combo}__{CLASS_TAG}__{BIN_TAG}_shard{k}.acc.tsv"
+
+def run(pheno, k):
+    outs = [acc_path(c, k) for c in models[pheno]]
+    if all(os.path.isfile(p) and os.path.getsize(p) > 0 for p in outs):
+        return pheno, k, 0.0, "skip", ""
+
+    log = f"{WORK}/logs/{pheno}_shard{k}.log"
+    t0 = time.monotonic()
+    with open(log, "w") as lf:
+        r = subprocess.run(
+            [SRC, "accumulate",
+             "--grm-id", GRM_ID,
+             "--shard", f"{SHARDS}/grm_shard_{k}_of_{N_SHARDS}.grm.bin.{k}",
+             "--parallel", str(k), str(N_SHARDS),
+             "--pheno-list", f"{WORK}/lists/{pheno}.tsv",
+             "--bins", BINS,
+             "--pair-classes", CLASSES,
+             "--nblocks", str(NBLOCKS), "--seed", str(SEED),
+             # {name} must reach the tool literally -- not an f-string
+             "--out-pattern", WORK + "/{name}_shard" + str(k) + ".acc.tsv"],
+            stdout=lf, stderr=subprocess.STDOUT, text=True)
+    el = time.monotonic() - t0
+
+    if r.returncode != 0:
+        for p in outs:                     # drop partials so a rerun redoes them
+            if os.path.isfile(p):
+                os.remove(p)
+        return pheno, k, el, f"FAIL rc={r.returncode}", log
+    return pheno, k, el, "ok", ""
+
+
+tasks = [(p, k) for p in models for k in range(1, N_SHARDS + 1)]
+print(f"{len(tasks)} invocations, {N_CONCURRENT} concurrent\n")
+
+fails, times, t0 = [], [], time.monotonic()
+with ThreadPoolExecutor(max_workers=N_CONCURRENT) as pool:
+    futs = [pool.submit(run, p, k) for p, k in tasks]
+    for i, f in enumerate(as_completed(futs), 1):
+        pheno, k, el, status, info = f.result()
+        if status.startswith("FAIL"):
+            fails.append((pheno, k, info))
+        elif status == "ok":
+            times.append(el)
+        if i % 25 == 0 or status.startswith("FAIL") or i == len(tasks):
+            eta = (len(tasks) - i) * (sum(times)/len(times) if times else 0) / N_CONCURRENT
+            print(f"[{i:>4}/{len(tasks)}] {pheno} shard {k:>2}: {el:6.1f}s {status} {info}"
+                  f"   ~{eta/60:.0f} min left")
+
+print(f"\ndone in {(time.monotonic()-t0)/60:.1f} min, {len(fails)} failed")
+for p, k, log in fails:
+    print(f"  FAILED {p} shard {k}: {log}")
+```
+
+Progress goes to the per-invocation logs, not the notebook — `tail -f` one to
+watch a shard advance.
+
+## Cell 6 — merge
 
 ```python
 import glob
 
-shard_files = {}
-for k in range(1, N_SHARDS + 1):
-    p = f"{SHARDS_DIR}/grm_shard_{k}_of_{N_SHARDS}.grm.bin.{k}"
-    if os.path.isfile(p):
-        shard_files[k] = p
+merged, incomplete = [], []
+for pheno, combos in models.items():
+    for c in combos:
+        tag = f"{c}__{CLASS_TAG}__{BIN_TAG}"
+        accs = sorted(glob.glob(f"{WORK}/{tag}_shard*.acc.tsv"),
+                      key=lambda p: int(p.rsplit("shard", 1)[1].split(".")[0]))
+        if len(accs) != N_SHARDS:
+            incomplete.append((tag, len(accs)))
+            continue
+        lst = f"{WORK}/lists/{tag}_acc.txt"
+        with open(lst, "w") as f:
+            f.write("\n".join(accs) + "\n")
+        subprocess.run([SRC, "merge", "--acc-list", lst, "--bins", BINS,
+                        "--nblocks", str(NBLOCKS),
+                        "--out-prefix", f"{WORK}/{tag}_merged"],
+                       check=True, capture_output=True)
+        merged.append(tag)
 
-print(f"shards      : {len(shard_files)}/{N_SHARDS}")
-print(f"grm.id      : {os.path.isfile(GRM_ID)}")
-print(f"bins        : {os.path.isfile(BINS_FILE)}")
-print(f"pheno dir   : {os.path.isdir(PHENO_DIR)}")
-
-if os.path.isdir(PHENO_DIR):
-    n_pheno = len(glob.glob(f"{PHENO_DIR}/*.pheno"))
-    print(f"pheno files : {n_pheno}")
-else:
-    print("\n*** PHENO_DIR missing — 02_phenotype has not been run for "
-          f"SAMPLE_SET={SAMPLE_SET}. Residualize first; this notebook needs "
-          "its .pheno output. ***")
+print(f"{len(merged)} merged")
+for tag, n in incomplete:
+    print(f"  INCOMPLETE {tag}: {n}/{N_SHARDS} shards")
 ```
 
-If `PHENO_DIR` doesn't exist, stop here — eur_D2 is a new sample set and the
-residualization (which uses its own keep list and PCs) has to run first.
-
-## Cell 4 — FID alignment
-
-`grm_shard_tool`'s pheno lookup keys on `(FID, IID)`. `.grm.id` has `FID = 0`;
-`write_grm_pheno()` emits `FID = IID = person_id`. Rewrite the phenotype
-file's FID from the real `.grm.id`, keyed on IID, so it works regardless of
-which convention either side uses.
-
-Header lines are `#`-prefixed with exactly two whitespace tokens —
-`grm_shard_tool` skips any line that doesn't parse to three, so it ignores them.
+## Cell 7 — plot one
 
 ```python
-import hashlib
-import pandas as pd
-from datetime import datetime, timezone
+import pandas as pd, numpy as np, matplotlib.pyplot as plt
 
-grm_ids = pd.read_csv(GRM_ID, sep=r"\s+", header=None, names=["FID", "IID"], dtype=str)
-id_map = dict(zip(grm_ids["IID"], grm_ids["FID"]))
-print(f"{len(grm_ids)} GRM ids, {grm_ids['FID'].nunique()} distinct FID -> "
-      f"{sorted(grm_ids['FID'].unique())[:3]}")
+TAG = f"height__invnorm__base_pcs__{CLASS_TAG}__{BIN_TAG}"   # <-- pick any merged tag
+MIN_N = 20
 
+raw = pd.read_csv(f"{WORK}/{TAG}_merged.full.tsv", sep="\t")
+raw = raw[(raw.full_n > 0) & (raw["class"] != "pooled")]
+d = raw[raw.full_n >= MIN_N]
 
-def build_aligned_pheno(pheno_path, out_path):
-    pheno = pd.read_csv(pheno_path, sep=r"\s+", dtype={"FID": str, "IID": str})
-    n_source = len(pheno)
-    pheno["FID"] = pheno["IID"].map(id_map)
-    keep = pheno["FID"].notna()
-    out = pheno[keep]
-    fingerprint = hashlib.sha256(
-        "\n".join(sorted(out["FID"] + "\t" + out["IID"])).encode()
-    ).hexdigest()
-    with open(out_path, "w") as f:
-        f.write(f"# source={os.path.basename(pheno_path)}\n")
-        f.write(f"# generated={datetime.now(timezone.utc).isoformat()}\n")
-        f.write(f"# n_source={n_source}\n")
-        f.write(f"# n_matched={len(out)}\n")
-        f.write(f"# n_dropped_unmatched={int((~keep).sum())}\n")
-        f.write(f"# id_set_sha256={fingerprint}\n")
-        out.to_csv(f, sep=" ", index=False, na_rep="NA")
-    return out_path, len(out), int((~keep).sum())
-```
+COL = {"other": "#4C78A8", "FS": "#F58518", "PO": "#E45756"}
+fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
 
-## Cell 5 — pick one combo
+ax = axes[0]
+for cls, c in COL.items():
+    s = d[d["class"] == cls]
+    if len(s):
+        ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt="o",
+                    ms=3.5 if cls == "other" else 8, lw=.8, capsize=2, color=c,
+                    zorder=1 if cls == "other" else 3,
+                    label=f"{cls} ({int(s.full_n.sum()):,})")
+fit = d[(d["class"] == "other") & d.bin_midpoint.between(-0.02, 0.02) & (d.jk_se > 0)]
+slope, icept = np.polyfit(fit.bin_midpoint, fit.full_mean, 1, w=1/fit.jk_se)
+xs = np.array([raw.bin_midpoint.min(), raw.bin_midpoint.max()])
+ax.plot(xs, icept + slope*xs, "k--", lw=1.2, zorder=2,
+        label=f"additive (slope={slope:.3f})")
+ax.axhline(0, color="grey", lw=.5)
+ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel(r"mean $y_i y_j$")
+ax.set_title(f"cross-product by class (n$\\geq${MIN_N})"); ax.legend(fontsize=8)
 
-```python
-combos = []
-for fname in sorted(os.listdir(PHENO_DIR)):
-    if not fname.endswith(".pheno"):
-        continue
-    parts = fname[:-len(".pheno")].rsplit("__", 2)
-    if len(parts) == 3:
-        combos.append(tuple(parts) + (fname,))
+ax = axes[1]
+for cls, c in COL.items():
+    s = raw[raw["class"] == cls].sort_values("bin_midpoint")
+    if len(s):
+        ax.step(s.bin_midpoint, s.full_n, where="mid", color=c, lw=1.4, label=cls)
+ax.set_yscale("log")
+ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel("pairs per bin (log)")
+ax.set_title("relatedness distribution"); ax.legend(fontsize=8)
 
-phenotypes = sorted({c[0] for c in combos})
-transforms = sorted({c[1] for c in combos})
-covsets = sorted({c[2] for c in combos})
+ax = axes[2]
+for cls, c in COL.items():
+    s = raw[(raw["class"] == cls) & raw.bin_midpoint.between(0.2, 1.15)].sort_values("bin_midpoint")
+    if len(s) and s.full_n.sum() > 0:
+        ax.step(s.bin_midpoint, s.full_n / s.full_n.sum(), where="mid",
+                color=c, lw=1.6, label=f"{cls} ({int(s.full_n.sum()):,})")
+ax.axvline(0.5, color="grey", lw=.5, ls=":")
+ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel("fraction of class")
+ax.set_title("shape in the related region"); ax.legend(fontsize=8)
 
-print(f"{len(combos)} files: {len(phenotypes)} phenotypes x "
-      f"{len(transforms)} transforms x {len(covsets)} covariate sets")
-print(f"\nphenotypes: {phenotypes}")
-print(f"transforms: {transforms}")
-print(f"covsets   : {covsets}")
-```
-
-```python
-# <-- set these three from the lists above
-PHENOTYPE = "height"
-TRANSFORM = "invnorm"
-COVSET = "base_pcs"
-
-PHENO_FILE = f"{PHENOTYPE}__{TRANSFORM}__{COVSET}.pheno"
-PHENO_PATH = f"{PHENO_DIR}/{PHENO_FILE}"
-assert os.path.isfile(PHENO_PATH), f"no such combo: {PHENO_FILE}"
-
-TAG = f"{PHENOTYPE}__{TRANSFORM}__{COVSET}__{EXCL_TAG}"
-print(f"testing: {TAG}")
-```
-
-`height` with `invnorm` and `base_pcs` is the sensible first test — high
-heritability, well behaved, and PCs included so residual ancestry structure
-isn't driving the unrelated-region slope. Swap if it isn't in the list.
-
-## Cell 6 — align the phenotype
-
-```python
-aligned, n_matched, n_dropped = build_aligned_pheno(
-    PHENO_PATH, f"{WORK_DIR}/{TAG}_aligned.pheno")
-
-print(f"{n_matched} matched, {n_dropped} dropped (IID not in .grm.id)")
-print(f"-> {aligned}\n")
-print(open(aligned).read(500))
-```
-
-A large `n_dropped` means the phenotype was residualized against a different
-sample set than the GRM was built on — check before continuing.
-
-## Cell 7 — accumulate
-
-One call per shard. Each is a linear scan over 5.74 GiB.
-
-```python
-import time
-
-acc_files = []
-t0 = time.monotonic()
-
-for k in sorted(shard_files):
-    acc_out = f"{WORK_DIR}/{TAG}_shard{k}.acc.tsv"
-    if os.path.isfile(acc_out) and os.path.getsize(acc_out) > 0:
-        print(f"[{k}/{N_SHARDS}] skip (exists)")
-    else:
-        t1 = time.monotonic()
-        subprocess.run(
-            [TOOL_BIN, "accumulate",
-             "--grm-id", GRM_ID,
-             "--shard", shard_files[k],
-             "--parallel", str(k), str(N_SHARDS),
-             "--pheno", aligned,
-             "--bins", BINS_FILE,
-             "--nblocks", str(NBLOCKS),
-             "--seed", str(SEED),
-             "--out", acc_out],
-            check=True,
-        )
-        print(f"[{k}/{N_SHARDS}] {time.monotonic() - t1:.0f}s")
-    acc_files.append(acc_out)
-
-print(f"\n{len(acc_files)} accumulators, {(time.monotonic() - t0) / 60:.1f} min")
-```
-
-`accumulate` prints each shard's resolved row range to stderr — check the
-first is `[0, 55499)` and the last `[214943, 221992)`.
-
-## Cell 8 — merge
-
-```python
-acc_list = f"{WORK_DIR}/{TAG}_acc_list.txt"
-with open(acc_list, "w") as f:
-    f.write("\n".join(acc_files) + "\n")
-
-out_prefix = f"{WORK_DIR}/{TAG}_merged"
-subprocess.run(
-    [TOOL_BIN, "merge",
-     "--acc-list", acc_list,
-     "--bins", BINS_FILE,
-     "--nblocks", str(NBLOCKS),
-     "--out-prefix", out_prefix],
-    check=True,
-)
-
-res = pd.read_csv(f"{out_prefix}.full.tsv", sep="\t")
-print(f"{len(res)} bins, {int(res['full_n'].sum()):,} pairs binned")
-res.head()
-```
-
-Total pairs binned will be below 24.6e9 — pairs are dropped when either
-phenotype is NaN or `a_ij` falls outside every bin. A big shortfall in the
-latter is worth checking: `bins.txt` starts at −0.05, so any more-negative
-`a_ij` is silently discarded.
-
-## Cell 9 — inspect
-
-```python
-d = res[res["full_n"] > 0].copy()
-
-print("=== unrelated region ===")
-print(d[(d.bin_midpoint > -0.01) & (d.bin_midpoint < 0.01)]
-      [["bin_midpoint", "full_n", "full_mean", "jk_se"]].to_string(index=False))
-
-print("\n=== related bins (n >= 20) ===")
-print(d[(d.bin_midpoint > 0.1) & (d.full_n >= 20)]
-      [["bin_midpoint", "full_n", "full_mean", "jk_se"]].to_string(index=False))
-
-print(f"\npairs in 1st-degree band (0.35-0.7): "
-      f"{int(d[(d.bin_midpoint >= 0.35) & (d.bin_midpoint < 0.7)]['full_n'].sum()):,}")
-print(f"pairs at a ~ 1.0 (0.9-1.1): "
-      f"{int(d[(d.bin_midpoint >= 0.9) & (d.bin_midpoint < 1.1)]['full_n'].sum()):,}")
-```
-
-The 1st-degree count here should roughly match what the relatedness screen
-found — a cross-check that both are reading the same shards the same way.
-
-## Cell 10 — plot
-
-```python
-import numpy as np
-import matplotlib.pyplot as plt
-
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-for ax, (lo, hi, title) in zip(axes, [
-    (-0.02, 0.02, "unrelated region"),
-    (-0.05, 1.10, "full range"),
-]):
-    s = d[(d.bin_midpoint >= lo) & (d.bin_midpoint <= hi)]
-    ax.errorbar(s["bin_midpoint"], s["full_mean"], yerr=s["jk_se"],
-                fmt="o", ms=3, lw=0.8, capsize=2)
-    ax.axhline(0, color="grey", lw=0.5)
-    ax.set_xlabel("relatedness (bin midpoint)")
-    ax.set_ylabel("mean phenotype cross-product")
-    ax.set_title(f"{TAG}\n{title}")
-
-# weighted slope over the unrelated region only
-fit = d[(d.bin_midpoint > -0.01) & (d.bin_midpoint < 0.01) & (d.jk_se > 0)]
-slope, intercept = np.polyfit(fit["bin_midpoint"], fit["full_mean"],
-                              1, w=1 / fit["jk_se"])
-xs = np.array([-0.05, 1.10])
-axes[1].plot(xs, intercept + slope * xs, "--", lw=1,
-             label=f"unrelated slope = {slope:.3f}")
-axes[1].legend()
-
-plt.tight_layout()
-plt.savefig(f"{PLOTS_DIR}/{TAG}.png", dpi=120)
+plt.suptitle(TAG, y=1.02)
+plt.tight_layout(); plt.savefig(f"{WORK}/plots/{TAG}.png", dpi=120, bbox_inches="tight")
 plt.show()
-print(f"h2_Unrel (unrelated-region slope) ~= {slope:.4f}")
+
+print(f"h2_Unrel = {slope:.4f}\n")
+print("1st-degree band (0.35-0.7), all bins:")
+for cls in ["PO", "FS", "other"]:
+    s = raw[(raw["class"] == cls) & raw.bin_midpoint.between(0.35, 0.7)]
+    if len(s):
+        n = s.full_n.sum(); m = s.full_sum.sum()/n
+        print(f"  {cls:<6} n={int(n):>7}  mean={m:.4f}  "
+              f"excess over additive {m - (icept + slope*0.5):+.4f}")
 ```
 
-## Cell 11 — persist to the bucket
+## Cell 8 — summary across phenotypes
+
+```python
+rows = []
+for tag in merged:
+    t = pd.read_csv(f"{WORK}/{tag}_merged.full.tsv", sep="\t")
+    t = t[(t.full_n > 0) & (t["class"] != "pooled")]
+    f_ = t[(t["class"] == "other") & t.bin_midpoint.between(-0.02, 0.02) & (t.jk_se > 0)]
+    if len(f_) < 3:
+        continue
+    sl, ic = np.polyfit(f_.bin_midpoint, f_.full_mean, 1, w=1/f_.jk_se)
+    rec = {"tag": tag, "h2_unrel": sl}
+    for cls in ["PO", "FS"]:
+        s = t[(t["class"] == cls) & t.bin_midpoint.between(0.35, 0.7)]
+        rec[f"{cls}_n"] = int(s.full_n.sum()) if len(s) else 0
+        rec[f"{cls}_mean"] = s.full_sum.sum()/s.full_n.sum() if len(s) and s.full_n.sum() else np.nan
+    rec["additive_at_0.5"] = ic + sl*0.5
+    rows.append(rec)
+
+summary = pd.DataFrame(rows).sort_values("h2_unrel", ascending=False)
+summary["FS_excess"] = summary["FS_mean"] - summary["additive_at_0.5"]
+summary["PO_excess"] = summary["PO_mean"] - summary["additive_at_0.5"]
+summary.to_csv(f"{WORK}/summary_{CLASS_TAG}_{BIN_TAG}.tsv", sep="\t", index=False)
+summary.head(30)
+```
+
+## Cell 9 — persist to the bucket
 
 ```bash
-%%bash -s "$WORK_DIR" "$BUCKET_DIR" "$TAG"
+%%bash -s "$WORK" "$BUCKET_DIR_GS" "$CLASS_TAG" "$BIN_TAG"
 set -e
-WORK_DIR=$1; BUCKET_DIR=$2; TAG=$3
+WORK=$1; BUCKET=$2; CLASS_TAG=$3; BIN_TAG=$4
+DEST="${BUCKET}/crossproducts"
 
-DEST="${BUCKET_DIR}/crossproducts"
-mkdir -p "$DEST/plots"
-cp "${WORK_DIR}/${TAG}_merged".*.tsv "$DEST/"
-cp "${WORK_DIR}/plots/${TAG}.png" "$DEST/plots/" 2>/dev/null || true
-ls -lh "$DEST"
+gcloud storage cp "${WORK}"/*_merged.full.tsv "${DEST}/" 
+gcloud storage cp "${WORK}"/*_merged.jk.tsv   "${DEST}/"
+gcloud storage cp "${WORK}/summary_${CLASS_TAG}_${BIN_TAG}.tsv" "${DEST}/"
+gcloud storage cp "${WORK}"/plots/*.png "${DEST}/plots/" 2>/dev/null || true
+gcloud storage ls "${DEST}/" | wc -l
 ```
 
-Accumulators stay local — they're per-shard intermediates and cheap to
-regenerate. Merged results and plots go to the bucket.
+Accumulators stay local — there are `n_models × 16` of them and they're cheap
+to regenerate. Merged results, the summary and plots go to the bucket.
 
 ---
 
-## What to check before scaling to all phenotypes
+## Checks before trusting the output
 
-1. **Row ranges** in Cell 7's stderr match `[0, 55499)` … `[214943, 221992)`.
-2. **`n_dropped_unmatched`** in Cell 6 is small.
-3. **1st-degree pair count** in Cell 9 is consistent with the relatedness screen.
-4. **Unrelated-region slope** in Cell 10 is a plausible h² for the phenotype.
-5. **Timing** — multiply Cell 7's total by the number of combos to size the
-   full run, and use `01b_grm_shard_accumulate_parallel.ipynb`'s
-   `ProcessPoolExecutor` pattern if it's too long serially.
+1. **Cell 3** passes — a truncated shard is the one failure that produces
+   plausible-looking wrong numbers rather than an error.
+2. **`pair classes: 8887 read, 8887 mapped, 0 unmapped`** in any log. Zero
+   mapped looks identical to "no classed pairs existed".
+3. **PO and FS both non-zero** in the per-phenotype class counts.
+4. **`h2_Unrel`** for height in a plausible range (~0.4–0.7 for a SNP-based
+   estimate in a European-ancestry sample). If height is wrong, nothing else
+   is interpretable.
+5. **FS excess > PO excess** over the additive line — FS carry 0.25 dominance
+   relatedness and a shared sibling environment; PO have neither.
 
 ## Notes
 
-- `EXCL_TAG` is in every filename. When PO exclusion lands, set it to
-  something like `expo` so those runs don't collide with these.
-- `bins.txt` spans −0.05 to 1.5. Pairs outside are silently dropped; Cell 8's
-  total is the check.
+- `EXCL_TAG`/`BIN_TAG` in every filename: bins are stored as indices, so
+  mixing schemes corrupts silently rather than erroring.
+- The skip check requires all of a phenotype's models to exist, so an
+  interrupted run redoes that phenotype's batch rather than leaving a partial
+  set.
 - Accumulators and `.pheno` files are participant-derived — gitignored, never
   commit.
