@@ -246,7 +246,7 @@ for pheno in sorted(by_pheno):
     plt.show()
 ```
 
-## Cell 7 — push what exists to the bucket
+## Cell 6 — push what exists to the bucket
 
 ```bash
 %%bash -s "$WORK" "$BUCKET_DIR_GS"
