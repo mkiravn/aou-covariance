@@ -7,7 +7,7 @@ whose 16 shards are all present, and plots what exists.
 Read-only with respect to the running job — merged output goes to different
 filenames, and merging is idempotent.
 
-Run cells in order; re-run cells 2–6 whenever you want an update.
+Run cells in order; re-run cells 2–5 whenever you want an update.
 
 ---
 
@@ -150,98 +150,100 @@ print(view[["phenotype", "h2_unrel", "PO_n", "PO_excess", "FS_n", "FS_excess"]]
       .round(4).to_string(index=False))
 ```
 
-## Cell 5 — overview plots
+## Cell 5 — plot every merged phenotype
+
+One figure per phenotype: a 2 × 4 grid of its models (transform × covariate
+set), each panel showing `other` / `PO` / `FS` against the additive prediction
+fitted on that model's own unrelated region.
+
+Reading across a row shows what adding covariates does to the slope; comparing
+rows shows raw against rank-inverse-normal. Panels share a y-axis within a
+phenotype so they are directly comparable.
 
 ```python
 import matplotlib.pyplot as plt
 
-VIEW = (S[S["covset"].eq("base_pcs") & S["transform"].eq("invnorm")]
-        .sort_values("h2_unrel"))
-fig, axes = plt.subplots(1, 2, figsize=(16, max(4, 0.28 * len(VIEW))))
+MIN_N = 20
+COVSETS    = ["base", "base_pcs", "base_pcs_zip3", "base_pcs_zip3_ses"]
+TRANSFORMS = ["raw", "invnorm"]
+COL = {"other": "#4C78A8", "FS": "#F58518", "PO": "#E45756"}
 
-ax = axes[0]
-ax.barh(VIEW["phenotype"], VIEW["h2_unrel"], color="#4C78A8")
-ax.axvline(0, color="grey", lw=.5)
-ax.set_xlabel(r"unrelated-region slope  ($\approx h^2$)")
-ax.set_title(f"h2_Unrel — invnorm, base_pcs ({len(VIEW)} phenotypes)")
-ax.tick_params(labelsize=8)
+by_pheno = defaultdict(dict)
+for tag in all_merged:
+    parts = tag.split("__")
+    if len(parts) >= 3:
+        by_pheno[parts[0]][(parts[1], parts[2])] = tag
 
-ax = axes[1]
-ok = VIEW.dropna(subset=["PO_excess", "FS_excess"])
-ax.scatter(ok.PO_excess, ok.FS_excess, s=28, color="#E45756", zorder=3)
-lim = np.nanmax(np.abs(np.r_[ok.PO_excess, ok.FS_excess])) * 1.15 if len(ok) else 1
-ax.plot([-lim, lim], [-lim, lim], "k--", lw=1, label="FS = PO (purely additive)")
-ax.axhline(0, color="grey", lw=.5); ax.axvline(0, color="grey", lw=.5)
-ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
-ax.set_xlabel("PO excess over additive"); ax.set_ylabel("FS excess over additive")
-ax.set_title("dominance + shared sibling environment\n(points above the line)")
-ax.legend(fontsize=8)
+print(f"{len(by_pheno)} phenotypes merged\n")
 
-plt.tight_layout()
-plt.savefig(f"{WORK}/plots/_overview.png", dpi=120, bbox_inches="tight")
-plt.show()
-```
 
-The right panel is the scientific payoff. PO and FS sit at the same `a_ij`, so
-under a purely additive model both excesses are zero and points fall on the
-diagonal. **Points above the line** carry `0.25 σ²_D + σ²_C(sib)` — the
-dominance and shared-sibling-environment contribution that pooling PO with FS
-would hide.
+def load(tag):
+    t = pd.read_csv(f"{WORK}/{tag}_merged.full.tsv", sep="\t")
+    t = t[(t.full_n > 0) & (t["class"] != "pooled")]
+    f_ = t[(t["class"] == "other") & t.bin_midpoint.between(-0.02, 0.02) & (t.jk_se > 0)]
+    if len(f_) < 3:
+        return None, None, None
+    slope, icept = np.polyfit(f_.bin_midpoint, f_.full_mean, 1, w=1 / f_.jk_se)
+    return t, slope, icept
 
-## Cell 6 — plot one model
 
-```python
-def plot_tag(tag, min_n=20, save=True):
-    raw = pd.read_csv(f"{WORK}/{tag}_merged.full.tsv", sep="\t")
-    raw = raw[(raw.full_n > 0) & (raw["class"] != "pooled")]
-    d = raw[raw.full_n >= min_n]
-    COL = {"other": "#4C78A8", "FS": "#F58518", "PO": "#E45756"}
+for pheno in sorted(by_pheno):
+    models_p = by_pheno[pheno]
+    loaded = {k: load(t) for k, t in models_p.items()}
+    loaded = {k: v for k, v in loaded.items() if v[0] is not None}
+    if not loaded:
+        continue
 
-    fig, axes = plt.subplots(1, 3, figsize=(19, 5.5))
-    ax = axes[0]
-    for cls, c in COL.items():
-        s = d[d["class"] == cls]
-        if len(s):
-            ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt="o",
-                        ms=3.5 if cls == "other" else 8, lw=.8, capsize=2, color=c,
-                        zorder=1 if cls == "other" else 3,
-                        label=f"{cls} ({int(s.full_n.sum()):,})")
-    f_ = d[(d["class"] == "other") & d.bin_midpoint.between(-0.02, 0.02) & (d.jk_se > 0)]
-    sl, ic = np.polyfit(f_.bin_midpoint, f_.full_mean, 1, w=1 / f_.jk_se)
-    xs = np.array([raw.bin_midpoint.min(), raw.bin_midpoint.max()])
-    ax.plot(xs, ic + sl * xs, "k--", lw=1.2, zorder=2, label=f"additive (slope={sl:.3f})")
-    ax.axhline(0, color="grey", lw=.5)
-    ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel(r"mean $y_i y_j$")
-    ax.set_title(f"cross-product by class (n$\\geq${min_n})"); ax.legend(fontsize=8)
+    # common y-limits across the phenotype's panels
+    vals = np.concatenate([d[d.full_n >= MIN_N].full_mean.values for d, _, _ in loaded.values()])
+    pad = 0.08 * (np.nanmax(vals) - np.nanmin(vals) or 1)
+    ylim = (np.nanmin(vals) - pad, np.nanmax(vals) + pad)
 
-    ax = axes[1]
-    for cls, c in COL.items():
-        s = raw[raw["class"] == cls].sort_values("bin_midpoint")
-        if len(s):
-            ax.step(s.bin_midpoint, s.full_n, where="mid", color=c, lw=1.4, label=cls)
-    ax.set_yscale("log"); ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel("pairs per bin (log)")
-    ax.set_title("relatedness distribution"); ax.legend(fontsize=8)
+    fig, axes = plt.subplots(len(TRANSFORMS), len(COVSETS),
+                             figsize=(21, 8.5), sharex=True, sharey=True)
+    for r, tf in enumerate(TRANSFORMS):
+        for c, cs in enumerate(COVSETS):
+            ax = axes[r, c]
+            got = loaded.get((tf, cs))
+            if got is None:
+                ax.text(.5, .5, "not merged", ha="center", va="center",
+                        transform=ax.transAxes, color="grey", fontsize=9)
+                ax.set_xticks([]); ax.set_yticks([])
+                continue
+            t, slope, icept = got
+            d = t[t.full_n >= MIN_N]
 
-    ax = axes[2]
-    for cls, c in COL.items():
-        s = raw[(raw["class"] == cls) & raw.bin_midpoint.between(0.2, 1.15)].sort_values("bin_midpoint")
-        if len(s) and s.full_n.sum() > 0:
-            ax.step(s.bin_midpoint, s.full_n / s.full_n.sum(), where="mid",
-                    color=c, lw=1.6, label=f"{cls} ({int(s.full_n.sum()):,})")
-    ax.axvline(0.5, color="grey", lw=.5, ls=":")
-    ax.set_xlabel(r"$a_{ij}$"); ax.set_ylabel("fraction of class")
-    ax.set_title("shape in the related region"); ax.legend(fontsize=8)
+            for cls, col in COL.items():
+                s = d[d["class"] == cls]
+                if len(s):
+                    ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt="o",
+                                ms=2.5 if cls == "other" else 7, lw=.7, capsize=1.5,
+                                color=col, zorder=1 if cls == "other" else 3,
+                                label=f"{cls} ({int(s.full_n.sum()):,})")
+            xs = np.array([t.bin_midpoint.min(), t.bin_midpoint.max()])
+            ax.plot(xs, icept + slope * xs, "k--", lw=1, zorder=2)
+            ax.axhline(0, color="grey", lw=.4)
+            ax.axvline(0.5, color="grey", lw=.4, ls=":")
+            ax.set_ylim(*ylim)
 
-    plt.suptitle(tag, y=1.02); plt.tight_layout()
-    if save:
-        plt.savefig(f"{WORK}/plots/{tag}.png", dpi=120, bbox_inches="tight")
+            n_po = int(d[d["class"] == "PO"].full_n.sum())
+            n_fs = int(d[d["class"] == "FS"].full_n.sum())
+            ax.set_title(f"{cs}" if r == 0 else "", fontsize=10)
+            ax.text(.03, .96, f"slope {slope:.3f}\nPO {n_po}  FS {n_fs}",
+                    transform=ax.transAxes, va="top", fontsize=8,
+                    bbox=dict(fc="white", ec="none", alpha=.7))
+            if c == 0:
+                ax.set_ylabel(f"{tf}\n" + r"mean $y_i y_j$", fontsize=9)
+            if r == len(TRANSFORMS) - 1:
+                ax.set_xlabel(r"$a_{ij}$")
+            if r == 0 and c == len(COVSETS) - 1:
+                ax.legend(fontsize=7, loc="lower right")
+
+    fig.suptitle(f"{pheno} — binned cross-products by pair class "
+                 f"(bins with n$\\geq${MIN_N}; dashed = additive prediction)", y=1.00)
+    plt.tight_layout()
+    plt.savefig(f"{WORK}/plots/{pheno}_models.png", dpi=110, bbox_inches="tight")
     plt.show()
-    return sl
-
-for t in all_merged:
-    if t.startswith("height__invnorm__base_pcs"):
-        plot_tag(t)
-        break
 ```
 
 ## Cell 7 — push what exists to the bucket
