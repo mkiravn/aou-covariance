@@ -90,6 +90,23 @@ def main() -> None:
             f.write(f"{iid} {iid} {val}\n")
     y_use = np.array([np.nan if i in missing else y[i] for i in range(n)])
 
+    # extra phenotypes with different missingness, to check that batching K of
+    # them gives byte-identical accumulators to running them one at a time
+    extra = []
+    for e, miss in enumerate([{1, 5, 40}, set(), {3, 7, 11, 50}], start=2):
+        ye = rng.normal(0.0, 1.0, size=n)
+        with open(f"{out}/test.pheno{e}", "w") as f:
+            f.write("FID IID Y\n")
+            for idx, iid in enumerate(ids):
+                val = "NA" if idx in miss else f"{ye[idx]:.10f}"
+                f.write(f"{iid} {iid} {val}\n")
+        extra.append(f"test.pheno{e}")
+
+    with open(f"{out}/pheno_list.tsv", "w") as f:
+        f.write(f"p1\t{out}/test.pheno\n")
+        for e, name in enumerate(extra, start=2):
+            f.write(f"p{e}\t{out}/{name}\n")
+
     bins = [(-0.05, 0.05), (0.05, 0.20), (0.20, 0.35), (0.35, 0.70), (0.70, 1.50)]
     with open(f"{out}/test.bins", "w") as f:
         for lo, hi in bins:

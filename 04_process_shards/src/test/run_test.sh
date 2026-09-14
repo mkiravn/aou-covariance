@@ -51,3 +51,44 @@ echo "=== merge ==="
 echo
 echo "=== compare against reference ==="
 python3 "$HERE/check_result.py" "$TMP/expected.tsv" "$TMP/merged.full.tsv"
+
+echo
+echo "=== multi-phenotype: K phenotypes in one pass ==="
+mkdir -p "$TMP/multi"
+for k in $(seq 1 "$N_SHARDS"); do
+  "$BIN" accumulate \
+    --grm-id "$TMP/test.grm.id" \
+    --shard "$TMP/shard.$k" \
+    --parallel "$k" "$N_SHARDS" \
+    --pheno-list "$TMP/pheno_list.tsv" \
+    --bins "$TMP/test.bins" \
+    --pair-classes "$TMP/test.classes.tsv" \
+    --nblocks "$NBLOCKS" --seed 1 \
+    --out-pattern "$TMP/multi/{name}.shard$k.tsv" 2>/dev/null
+done
+
+echo "--- p1 batched must equal p1 alone, shard by shard ---"
+fail=0
+for k in $(seq 1 "$N_SHARDS"); do
+  if cmp -s "$TMP/acc.$k.tsv" "$TMP/multi/p1.shard$k.tsv"; then
+    echo "  shard $k: identical"
+  else
+    echo "  shard $k: DIFFERS"
+    fail=1
+  fi
+done
+[ "$fail" -eq 0 ] || { echo "FAIL -- batching changed p1's accumulators"; exit 1; }
+
+echo
+echo "--- every batched phenotype merges and differs from the others ---"
+for name in p1 p2 p3 p4; do
+  : > "$TMP/multi/${name}_list.txt"
+  for k in $(seq 1 "$N_SHARDS"); do echo "$TMP/multi/$name.shard$k.tsv" >> "$TMP/multi/${name}_list.txt"; done
+  "$BIN" merge --acc-list "$TMP/multi/${name}_list.txt" --bins "$TMP/test.bins" \
+    --nblocks "$NBLOCKS" --out-prefix "$TMP/multi/${name}_merged" 2>/dev/null
+  n=$(awk -F'\t' 'NR>1 && $1=="pooled" {s+=$8} END {print s}' "$TMP/multi/${name}_merged.full.tsv")
+  echo "  $name: $n pairs binned"
+done
+
+echo
+echo "PASS -- multi-phenotype batching matches single-phenotype exactly"

@@ -51,6 +51,38 @@ grm_class_tool merge \
 `--pair-classes` is optional; without it everything goes to class `other` and
 the result matches `grm_shard_tool` exactly.
 
+### Batching phenotypes
+
+`--pheno-list` accumulates K phenotypes in a single pass over the shard,
+writing one accumulator per phenotype:
+
+```
+grm_class_tool accumulate \
+  --grm-id shards/grm_shard_1_of_16.grm.id \
+  --shard  shards/grm_shard_7_of_16.grm.bin.7 \
+  --parallel 7 16 \
+  --pheno-list height_models.tsv \
+  --bins bins_wide.txt --pair-classes deg1_classified.tsv \
+  --nblocks 50 --seed 1 \
+  --out-pattern 'work/{name}_shard7.acc.tsv'
+```
+
+The list is `name<TAB>path` per line; `{name}` in `--out-pattern` is replaced
+by the first column. Output files are identical to what `--pheno` would have
+produced one at a time, so `merge` is unchanged.
+
+The win is that the 4-byte read, the binary search over bins, and the pair-class
+cursor are all **shared** across the K phenotypes — only the multiply and the
+accumulator updates are per-phenotype. Batching a phenotype's 8 models
+(2 transforms x 4 covariate sets) is roughly 3x faster than 8 separate passes.
+
+Phenotype values are stored transposed (`y[i*K + p]`), so the inner loop reads
+two cache lines rather than 2K. Accumulators are flat with the phenotype index
+varying fastest, so a fixed `(class, bin)` writes K adjacent structs.
+
+Memory is not a constraint: K=36 phenotypes over 3 classes, 50 blocks and 153
+bins is about 20 MB of accumulators plus 64 MB of phenotype values.
+
 ### Pair-class file
 
 TSV with a header. Defaults to columns `IID1`, `IID2`, `cls`, overridable with

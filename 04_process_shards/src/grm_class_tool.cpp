@@ -198,6 +198,37 @@ static std::vector<double> read_pheno_aligned(const std::string& path, const IdT
     return y;
 }
 
+struct PhenoSpec {
+    std::string name, path;
+};
+
+// Lines of "name<TAB>path". Blank lines and #-comments ignored.
+static std::vector<PhenoSpec> read_pheno_list(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("Could not open pheno-list file: " + path);
+
+    std::vector<PhenoSpec> out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream iss(line);
+        std::string name, p;
+        if (!(iss >> name >> p)) continue;
+        out.push_back({name, p});
+    }
+    if (out.empty()) throw std::runtime_error("No entries in pheno-list file: " + path);
+    return out;
+}
+
+static std::string substitute_name(const std::string& pattern, const std::string& name) {
+    const std::string token = "{name}";
+    std::size_t pos = pattern.find(token);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("--out-pattern must contain {name}: " + pattern);
+    }
+    return pattern.substr(0, pos) + name + pattern.substr(pos + token.size());
+}
+
 static std::vector<Bin> read_bins(const std::string& path) {
     std::ifstream in(path);
     if (!in) throw std::runtime_error("Could not open bins file: " + path);
@@ -408,6 +439,7 @@ static ShardRange resolve_shard_range(uint64_t n_ids, int k, int n_shards, uint6
 
 struct AccumulateArgs {
     std::string grm_id, shard, pheno, bins, out, pair_classes;
+    std::string pheno_list, out_pattern;
     std::string id_col1 = "IID1", id_col2 = "IID2", class_col = "cls";
     int parallel_k = 0, parallel_n = 0, nblocks = 0;
     unsigned int seed = 1;
@@ -424,8 +456,10 @@ static AccumulateArgs parse_accumulate_args(int argc, char** argv) {
         if (key == "--grm-id") a.grm_id = need(key);
         else if (key == "--shard") a.shard = need(key);
         else if (key == "--pheno") a.pheno = need(key);
+        else if (key == "--pheno-list") a.pheno_list = need(key);
         else if (key == "--bins") a.bins = need(key);
         else if (key == "--out") a.out = need(key);
+        else if (key == "--out-pattern") a.out_pattern = need(key);
         else if (key == "--pair-classes") a.pair_classes = need(key);
         else if (key == "--id-col1") a.id_col1 = need(key);
         else if (key == "--id-col2") a.id_col2 = need(key);
@@ -437,13 +471,21 @@ static AccumulateArgs parse_accumulate_args(int argc, char** argv) {
             a.parallel_n = std::stoi(need(key));
         } else throw std::runtime_error("Unknown argument: " + key);
     }
-    if (a.grm_id.empty() || a.shard.empty() || a.pheno.empty() || a.bins.empty() ||
-        a.out.empty() || a.parallel_k == 0 || a.parallel_n == 0 || a.nblocks <= 0) {
+    const bool one = !a.pheno.empty(), many = !a.pheno_list.empty();
+    if (one == many) {
+        throw std::runtime_error("Give exactly one of --pheno or --pheno-list");
+    }
+    if (one && a.out.empty()) throw std::runtime_error("--pheno requires --out");
+    if (many && a.out_pattern.empty()) {
+        throw std::runtime_error("--pheno-list requires --out-pattern (containing {name})");
+    }
+    if (a.grm_id.empty() || a.shard.empty() || a.bins.empty() ||
+        a.parallel_k == 0 || a.parallel_n == 0 || a.nblocks <= 0) {
         throw std::runtime_error(
             "Usage: grm_class_tool accumulate --grm-id FILE --shard FILE --parallel K N "
-            "--pheno FILE --bins FILE --nblocks INT [--seed INT] "
+            "--bins FILE --nblocks INT [--seed INT] "
             "[--pair-classes FILE [--id-col1 IID1] [--id-col2 IID2] [--class-col cls]] "
-            "--out FILE");
+            "(--pheno FILE --out FILE | --pheno-list FILE --out-pattern 'DIR/{name}.acc.tsv')");
     }
     return a;
 }
@@ -451,12 +493,25 @@ static AccumulateArgs parse_accumulate_args(int argc, char** argv) {
 static int run_accumulate(int argc, char** argv) {
     AccumulateArgs args = parse_accumulate_args(argc, argv);
 
+    std::vector<PhenoSpec> specs;
+    if (!args.pheno.empty()) specs.push_back({"", args.pheno});
+    else specs = read_pheno_list(args.pheno_list);
+    const std::size_t K = specs.size();
+
     IdTable ids = read_ids(args.grm_id);
     const uint64_t n_ids = ids.iid.size();
-    std::vector<double> y = read_pheno_aligned(args.pheno, ids);
     std::vector<Bin> bins = read_bins(args.bins);
-    const int nbins = static_cast<int>(bins.size());
+    const std::size_t nbins = bins.size();
     std::vector<int> block_of = make_random_blocks(n_ids, args.nblocks, args.seed);
+
+    // Transposed: all K values for individual i are adjacent, so the inner
+    // phenotype loop touches two cache lines rather than 2K.
+    std::vector<double> y(n_ids * K, std::numeric_limits<double>::quiet_NaN());
+    for (std::size_t p = 0; p < K; ++p) {
+        std::vector<double> col = read_pheno_aligned(specs[p].path, ids);
+        for (uint64_t i = 0; i < n_ids; ++i) y[i * K + p] = col[i];
+    }
+    if (K > 1) std::cerr << "[INFO] " << K << " phenotypes loaded\n";
 
     PairClasses pc;
     if (!args.pair_classes.empty()) {
@@ -474,7 +529,7 @@ static int run_accumulate(int argc, char** argv) {
         pc.names.push_back(OTHER_CLASS);
         pc.by_row.assign(n_ids, {});
     }
-    const int ncls = static_cast<int>(pc.names.size());
+    const std::size_t ncls = pc.names.size();
 
     std::ifstream shard(args.shard, std::ios::binary | std::ios::ate);
     if (!shard) throw std::runtime_error("Could not open shard file: " + args.shard);
@@ -489,11 +544,16 @@ static int run_accumulate(int argc, char** argv) {
     std::cerr << "[INFO] Shard " << args.parallel_k << "/" << args.parallel_n
               << " covers rows [" << range.row_start << ", " << range.row_end << ")\n";
 
-    // full[c][k], drop[c][b][k]
-    std::vector<std::vector<Acc>> full(ncls, std::vector<Acc>(nbins));
-    std::vector<std::vector<std::vector<Acc>>> drop(
-        ncls, std::vector<std::vector<Acc>>(args.nblocks, std::vector<Acc>(nbins)));
-    std::vector<std::uint64_t> class_hits(ncls, 0);
+    // Flat, with the phenotype index varying fastest: the inner loop writes
+    // K adjacent Acc structs for a fixed (class, bin).
+    const std::size_t nblk = static_cast<std::size_t>(args.nblocks);
+    std::vector<Acc> acc_full(ncls * nbins * K);
+    std::vector<Acc> acc_drop(ncls * nblk * nbins * K);
+    std::vector<std::uint64_t> class_hits(K * ncls, 0);
+    auto FI = [&](std::size_t c, std::size_t k) { return (c * nbins + k) * K; };
+    auto DI = [&](std::size_t c, std::size_t b, std::size_t k) {
+        return ((c * nblk + b) * nbins + k) * K;
+    };
 
     char plabel[64];
     std::snprintf(plabel, sizeof plabel, "[shard %d/%d]", args.parallel_k, args.parallel_n);
@@ -503,65 +563,83 @@ static int run_accumulate(int argc, char** argv) {
     float g_f = 0.0f;
     for (uint64_t i = range.row_start; i < range.row_end; ++i) {
         const std::vector<ClassedPartner>& ex = pc.by_row[i];
-        std::size_t p = 0;
+        std::size_t p_cursor = 0;
+        const double* yi_row = &y[i * K];
+        const int bi = block_of[i];
+
         for (uint64_t j = 0; j <= i; ++j) {
             shard.read(reinterpret_cast<char*>(&g_f), sizeof(float));
             if (!shard) throw std::runtime_error("Unexpected end of shard while reading row " +
                                                   std::to_string(i));
             if (i == j) continue;
 
-            // one integer compare on rows with no classed partners (the vast majority)
-            int cls = 0;
-            if (p < ex.size() && ex[p].j == static_cast<std::uint32_t>(j)) {
-                cls = ex[p].cls;
-                ++p;
+            // one integer compare on rows with no classed partners
+            std::size_t cls = 0;
+            if (p_cursor < ex.size() && ex[p_cursor].j == static_cast<std::uint32_t>(j)) {
+                cls = ex[p_cursor].cls;
+                ++p_cursor;
             }
 
-            const double yi = y[i], yj = y[j];
-            if (std::isnan(yi) || std::isnan(yj)) continue;
+            // bin lookup is shared across all K phenotypes -- this is what
+            // batching amortizes
+            const int kb = get_bin(static_cast<double>(g_f), bins);
+            if (kb < 0) continue;
+            const std::size_t k = static_cast<std::size_t>(kb);
 
-            const int k = get_bin(static_cast<double>(g_f), bins);
-            if (k < 0) continue;
+            const double* yj_row = &y[j * K];
+            const int bj = block_of[j];
+            Acc* f = &acc_full[FI(cls, k)];
+            Acc* d1 = &acc_drop[DI(cls, static_cast<std::size_t>(bi), k)];
+            Acc* d2 = (bj != bi) ? &acc_drop[DI(cls, static_cast<std::size_t>(bj), k)] : nullptr;
+            std::uint64_t* hits = &class_hits[cls];
 
-            const double prod = yi * yj;
-            full[cls][k].add(prod);
-            class_hits[cls]++;
-
-            const int bi = block_of[i], bj = block_of[j];
-            drop[cls][bi][k].add(prod);
-            if (bj != bi) drop[cls][bj][k].add(prod);
+            for (std::size_t p = 0; p < K; ++p) {
+                const double yi = yi_row[p], yj = yj_row[p];
+                if (std::isnan(yi) || std::isnan(yj)) continue;
+                const double prod = yi * yj;
+                f[p].add(prod);
+                d1[p].add(prod);
+                if (d2) d2[p].add(prod);
+                hits[p * ncls] += 1;
+            }
         }
-        // once per row, not per entry -- the inner loop stays untouched
         entries_done += i + 1;
         prog.update(entries_done);
     }
     prog.finish(entries_done);
 
-    std::ofstream out(args.out);
-    if (!out) throw std::runtime_error("Could not open output file: " + args.out);
-    out << "class\tscope\tblock\tbin_index\tsum\tsum_sq\tn\n";
-    out.precision(17);
-    for (int c = 0; c < ncls; ++c) {
-        for (int k = 0; k < nbins; ++k) {
-            if (full[c][k].n == 0) continue;
-            out << pc.names[c] << "\tfull\t-1\t" << k << '\t' << full[c][k].sum << '\t'
-                << full[c][k].sum_sq << '\t' << full[c][k].n << '\n';
-        }
-        for (int b = 0; b < args.nblocks; ++b) {
-            for (int k = 0; k < nbins; ++k) {
-                if (drop[c][b][k].n == 0) continue;
-                out << pc.names[c] << "\tdrop\t" << b << '\t' << k << '\t' << drop[c][b][k].sum
-                    << '\t' << drop[c][b][k].sum_sq << '\t' << drop[c][b][k].n << '\n';
+    for (std::size_t p = 0; p < K; ++p) {
+        const std::string out_path =
+            args.pheno.empty() ? substitute_name(args.out_pattern, specs[p].name) : args.out;
+        std::ofstream out(out_path);
+        if (!out) throw std::runtime_error("Could not open output file: " + out_path);
+        out << "class\tscope\tblock\tbin_index\tsum\tsum_sq\tn\n";
+        out.precision(17);
+        for (std::size_t c = 0; c < ncls; ++c) {
+            for (std::size_t k = 0; k < nbins; ++k) {
+                const Acc& a = acc_full[FI(c, k) + p];
+                if (a.n == 0) continue;
+                out << pc.names[c] << "\tfull\t-1\t" << k << '\t' << a.sum << '\t' << a.sum_sq
+                    << '\t' << a.n << '\n';
+            }
+            for (std::size_t b = 0; b < nblk; ++b) {
+                for (std::size_t k = 0; k < nbins; ++k) {
+                    const Acc& a = acc_drop[DI(c, b, k) + p];
+                    if (a.n == 0) continue;
+                    out << pc.names[c] << "\tdrop\t" << b << '\t' << k << '\t' << a.sum << '\t'
+                        << a.sum_sq << '\t' << a.n << '\n';
+                }
             }
         }
+        std::cerr << "[INFO] " << (specs[p].name.empty() ? "binned pairs" : specs[p].name)
+                  << " by class:";
+        for (std::size_t c = 0; c < ncls; ++c) {
+            std::cerr << " " << pc.names[c] << "=" << class_hits[p * ncls + c];
+        }
+        std::cerr << " -> " << out_path << "\n";
     }
-
-    std::cerr << "[INFO] binned pairs by class:";
-    for (int c = 0; c < ncls; ++c) std::cerr << " " << pc.names[c] << "=" << class_hits[c];
-    std::cerr << "\n[INFO] Wrote accumulator to " << args.out << "\n";
     return 0;
 }
-
 // ---------------------------------------------------------------------------
 // merge
 // ---------------------------------------------------------------------------
