@@ -86,6 +86,25 @@ full_n  full_mean  full_sd  full_se  jk_mean  jk_var  jk_se
 
 The `pooled` class is synthesised at merge time as the sum over real classes.
 
+## Progress
+
+`accumulate` reports progress against the shard's entry count, which is linear
+in work (row `i` holds `i` entries, so row count is not):
+
+```
+[shard 16/16]  30%  1m12s elapsed, 2m48s left, 21M entries/s
+[shard 16/16] done in 4m01s (21M entries/s)
+```
+
+On a terminal it overwrites in place every 2%; when redirected to a log it
+prints one line every 10%, so a 288-combo batch doesn't emit thousands of bar
+fragments. The counter is updated once per row, never per entry, so the inner
+loop is untouched.
+
+The entries/s rate is the useful number for extrapolating a full run: every
+shard holds the same entry count (plink balances `--parallel` on pair count),
+so one shard's time times the shard count gives the per-combo total.
+
 ## Validation
 
 `accumulate` reports to stderr, per shard:

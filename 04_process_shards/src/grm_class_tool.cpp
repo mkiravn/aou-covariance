@@ -24,8 +24,10 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -34,10 +36,75 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
 static const char* OTHER_CLASS = "other";
+
+// ---------------------------------------------------------------------------
+// Progress reporting
+// ---------------------------------------------------------------------------
+
+using Clock = std::chrono::steady_clock;
+
+static double seconds_since(Clock::time_point t0) {
+    return std::chrono::duration<double>(Clock::now() - t0).count();
+}
+
+static std::string fmt_duration(double sec) {
+    if (sec < 0 || !std::isfinite(sec)) return "--";
+    int s = static_cast<int>(sec + 0.5);
+    int h = s / 3600, m = (s % 3600) / 60, r = s % 60;
+    char buf[32];
+    if (h) std::snprintf(buf, sizeof buf, "%dh%02dm", h, m);
+    else if (m) std::snprintf(buf, sizeof buf, "%dm%02ds", m, r);
+    else std::snprintf(buf, sizeof buf, "%ds", r);
+    return buf;
+}
+
+// Overwrites in place on a terminal, one line per step when redirected to a
+// log -- so a 288-combo batch run doesn't produce thousands of bar fragments.
+struct Progress {
+    Clock::time_point t0 = Clock::now();
+    std::uint64_t total = 0, next = 0, step = 0;
+    bool tty = false;
+    const char* label = "";
+
+    Progress(std::uint64_t total_, const char* label_) : total(total_), label(label_) {
+        tty = isatty(fileno(stderr));
+        step = total / (tty ? 50 : 10);   // 2% on a terminal, 10% in a log
+        if (step == 0) step = 1;
+        next = step;
+    }
+
+    void update(std::uint64_t done) {
+        if (done < next || total == 0) return;
+        next = done + step;
+        const double frac = static_cast<double>(done) / static_cast<double>(total);
+        const double el = seconds_since(t0);
+        const double rate = el > 0 ? static_cast<double>(done) / el / 1e6 : 0.0;
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      "%s%s %3.0f%%  %s elapsed, %s left, %.0fM entries/s%s",
+                      tty ? "\r" : "", label, frac * 100.0,
+                      fmt_duration(el).c_str(),
+                      fmt_duration(frac > 0 ? el / frac - el : -1).c_str(),
+                      rate, tty ? "    " : "");
+        std::fputs(buf, stderr);
+        if (!tty) std::fputc('\n', stderr);
+        std::fflush(stderr);
+    }
+
+    void finish(std::uint64_t done) {
+        const double el = seconds_since(t0);
+        if (tty) std::fputc('\r', stderr);
+        std::fprintf(stderr, "%s done in %s (%.0fM entries/s)%s\n", label,
+                     fmt_duration(el).c_str(),
+                     el > 0 ? static_cast<double>(done) / el / 1e6 : 0.0,
+                     tty ? "                    " : "");
+    }
+};
 
 struct Bin {
     double left;
@@ -428,6 +495,11 @@ static int run_accumulate(int argc, char** argv) {
         ncls, std::vector<std::vector<Acc>>(args.nblocks, std::vector<Acc>(nbins)));
     std::vector<std::uint64_t> class_hits(ncls, 0);
 
+    char plabel[64];
+    std::snprintf(plabel, sizeof plabel, "[shard %d/%d]", args.parallel_k, args.parallel_n);
+    Progress prog(shard_floats, plabel);
+    std::uint64_t entries_done = 0;
+
     float g_f = 0.0f;
     for (uint64_t i = range.row_start; i < range.row_end; ++i) {
         const std::vector<ClassedPartner>& ex = pc.by_row[i];
@@ -459,7 +531,11 @@ static int run_accumulate(int argc, char** argv) {
             drop[cls][bi][k].add(prod);
             if (bj != bi) drop[cls][bj][k].add(prod);
         }
+        // once per row, not per entry -- the inner loop stays untouched
+        entries_done += i + 1;
+        prog.update(entries_done);
     }
+    prog.finish(entries_done);
 
     std::ofstream out(args.out);
     if (!out) throw std::runtime_error("Could not open output file: " + args.out);
@@ -570,6 +646,7 @@ static void jackknife_summary(int k, const std::vector<Acc>& full,
 }
 
 static int run_merge(int argc, char** argv) {
+    const Clock::time_point t_merge = Clock::now();
     MergeArgs args = parse_merge_args(argc, argv);
     std::vector<Bin> bins = read_bins(args.bins);
     const int nbins = static_cast<int>(bins.size());
@@ -678,7 +755,7 @@ static int run_merge(int argc, char** argv) {
     }
 
     std::cerr << "[INFO] Wrote " << args.out_prefix << ".full.tsv and " << args.out_prefix
-              << ".jk.tsv\n";
+              << ".jk.tsv in " << fmt_duration(seconds_since(t_merge)) << "\n";
     return 0;
 }
 
