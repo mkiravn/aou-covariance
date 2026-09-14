@@ -80,6 +80,16 @@ done
 [ "$fail" -eq 0 ] || { echo "FAIL -- batching changed p1's accumulators"; exit 1; }
 
 echo
+echo "--- a path containing spaces resolves (AoU bucket mount) ---"
+for k in $(seq 1 "$N_SHARDS"); do
+  if ! cmp -s "$TMP/acc.$k.tsv" "$TMP/multi/p_spaced.shard$k.tsv"; then
+    echo "FAIL -- p_spaced (same data via a spaced path) differs from p1 on shard $k"
+    exit 1
+  fi
+done
+echo "  identical to p1 on all $N_SHARDS shards"
+
+echo
 echo "--- every batched phenotype merges and differs from the others ---"
 for name in p1 p2 p3 p4; do
   : > "$TMP/multi/${name}_list.txt"

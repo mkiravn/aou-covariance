@@ -102,10 +102,19 @@ def main() -> None:
                 f.write(f"{iid} {iid} {val}\n")
         extra.append(f"test.pheno{e}")
 
+    # one phenotype under a directory whose name contains spaces, mirroring the
+    # AoU bucket mount ("Data from All of Us Controlled Tier /shared-env-pilot").
+    # A whitespace-splitting list parser truncates the path and fails here.
+    spacey = os.path.join(out, "dir with spaces")
+    os.makedirs(spacey, exist_ok=True)
+    with open(f"{out}/test.pheno") as src, open(f"{spacey}/spaced.pheno", "w") as dst:
+        dst.write(src.read())
+
     with open(f"{out}/pheno_list.tsv", "w") as f:
         f.write(f"p1\t{out}/test.pheno\n")
         for e, name in enumerate(extra, start=2):
             f.write(f"p{e}\t{out}/{name}\n")
+        f.write(f"p_spaced\t{spacey}/spaced.pheno\n")
 
     bins = [(-0.05, 0.05), (0.05, 0.20), (0.20, 0.35), (0.35, 0.70), (0.70, 1.50)]
     with open(f"{out}/test.bins", "w") as f:

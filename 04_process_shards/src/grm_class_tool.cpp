@@ -203,17 +203,35 @@ struct PhenoSpec {
 };
 
 // Lines of "name<TAB>path". Blank lines and #-comments ignored.
+//
+// Split on the FIRST TAB only, never on whitespace: the AoU workspace bucket
+// mounts under a path containing spaces ("Data from All of Us Controlled Tier
+// /shared-env-pilot"), so a whitespace split silently truncates every path at
+// "/home/jupyter/workspace/Data".
 static std::vector<PhenoSpec> read_pheno_list(const std::string& path) {
     std::ifstream in(path);
     if (!in) throw std::runtime_error("Could not open pheno-list file: " + path);
 
     std::vector<PhenoSpec> out;
     std::string line;
+    int lineno = 0;
     while (std::getline(in, line)) {
+        lineno++;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
-        std::istringstream iss(line);
-        std::string name, p;
-        if (!(iss >> name >> p)) continue;
+
+        const std::size_t tab = line.find('\t');
+        if (tab == std::string::npos) {
+            throw std::runtime_error(
+                "pheno-list " + path + " line " + std::to_string(lineno) +
+                " has no tab -- format is name<TAB>path (paths may contain spaces)");
+        }
+        std::string name = line.substr(0, tab);
+        std::string p = line.substr(tab + 1);
+        if (name.empty() || p.empty()) {
+            throw std::runtime_error("pheno-list " + path + " line " +
+                                     std::to_string(lineno) + " has an empty field");
+        }
         out.push_back({name, p});
     }
     if (out.empty()) throw std::runtime_error("No entries in pheno-list file: " + path);
