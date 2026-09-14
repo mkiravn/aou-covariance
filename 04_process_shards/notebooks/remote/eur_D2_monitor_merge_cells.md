@@ -141,10 +141,13 @@ S["PO_excess"] = S.PO_mean - S["additive_at_0.5"]
 S = S.sort_values("h2_unrel", ascending=False)
 S.to_csv(f"{WORK}/summary_{CLASS_TAG}_{BIN_TAG}.tsv", sep="\t", index=False)
 
-print(f"{len(S)} models; {S.phenotype.nunique()} phenotypes\n")
-S[S.covset.eq("base_pcs") & S.transform.eq("invnorm")][
-    ["phenotype", "h2_unrel", "PO_n", "PO_excess", "FS_n", "FS_excess"]
-].round(4).to_string(index=False)
+print(f"{len(S)} models; {S['phenotype'].nunique()} phenotypes\n")
+
+# NB: bracket access, not S.transform -- `transform` is a DataFrame method,
+# so attribute access returns the method rather than the column.
+view = S[S["covset"].eq("base_pcs") & S["transform"].eq("invnorm")]
+print(view[["phenotype", "h2_unrel", "PO_n", "PO_excess", "FS_n", "FS_excess"]]
+      .round(4).to_string(index=False))
 ```
 
 ## Cell 5 — overview plots
@@ -152,11 +155,12 @@ S[S.covset.eq("base_pcs") & S.transform.eq("invnorm")][
 ```python
 import matplotlib.pyplot as plt
 
-VIEW = S[S.covset.eq("base_pcs") & S.transform.eq("invnorm")].sort_values("h2_unrel")
+VIEW = (S[S["covset"].eq("base_pcs") & S["transform"].eq("invnorm")]
+        .sort_values("h2_unrel"))
 fig, axes = plt.subplots(1, 2, figsize=(16, max(4, 0.28 * len(VIEW))))
 
 ax = axes[0]
-ax.barh(VIEW.phenotype, VIEW.h2_unrel, color="#4C78A8")
+ax.barh(VIEW["phenotype"], VIEW["h2_unrel"], color="#4C78A8")
 ax.axvline(0, color="grey", lw=.5)
 ax.set_xlabel(r"unrelated-region slope  ($\approx h^2$)")
 ax.set_title(f"h2_Unrel — invnorm, base_pcs ({len(VIEW)} phenotypes)")
