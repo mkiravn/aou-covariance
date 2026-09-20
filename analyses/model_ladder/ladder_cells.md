@@ -153,7 +153,8 @@ def cat_handles():
 
 def forest(D, title, xlabel, fname):
     """One row per phenotype, one panel per transform, covariate sets dodged
-    and marker-coded, colour = trait category."""
+    and marker-coded, colour = trait category. Filled where the estimate is
+    more than one jackknife SE from zero, hollow where it is not."""
     offsets = np.linspace(-0.3, 0.3, len(COVSETS))
     fig, axes = plt.subplots(1, len(TRANSFORMS), figsize=(15, 0.3 * len(ORDER) + 2),
                              sharey=True, sharex=True)
@@ -165,11 +166,14 @@ def forest(D, title, xlabel, fname):
             if s.empty:
                 continue
             y = s["phenotype"].map(YPOS) + off
-            cols = s["category"].map(CAT_COL).tolist()
+            cols = np.array(s["category"].map(CAT_COL).tolist())
             se = s["se"].fillna(0)
             ax.hlines(y, s["est"] - se, s["est"] + se, colors=cols, lw=0.8, alpha=0.5)
-            ax.scatter(s["est"], y, c=cols, marker=CS_MARK[cs], s=24,
+            sig = (s["est"].abs() > se).to_numpy()
+            ax.scatter(s["est"][sig], y[sig], c=cols[sig], marker=CS_MARK[cs], s=24,
                        edgecolors="0.25", linewidths=0.4, zorder=3)
+            ax.scatter(s["est"][~sig], y[~sig], facecolors="none", marker=CS_MARK[cs], s=24,
+                       edgecolors=cols[~sig], linewidths=0.7, alpha=0.7, zorder=3)
         ax.axvline(0, color="grey", lw=0.6)
         dress_y(ax)
         ax.set_title(tf)
@@ -227,6 +231,111 @@ plt.show()
 Offsets that fall with degree are shared environment or dominance that decays
 with relatedness. Offsets near zero leave the related slope to carry everything.
 
+## Cell 5b — statistical support for each rung
+
+Two views. Left: z for each contrast, estimate over its jackknife SE, so how
+strongly the data ask for that term. Right: fit of each rung to the binned
+means, as chi-square per bin against the bins' own jackknife SEs, with the
+change in chi-square between nested rungs printed.
+
+Bins are correlated and hold many pairs, so read chi-square as a descriptive
+measure of misfit, not a test.
+
+```python
+from matplotlib.colors import TwoSlopeNorm
+
+CONTRASTS = ["diff_Rel-Unrel", "diff_RelOffsets-Unrel", "diff_Rel-RelOffsets"]
+RUNGS = ["h2_OneSlope", "h2_Rel", "h2_OneSlopeOffsets", "h2_RelOffsets"]
+NOPO_CLS = [HE.CLS.index(c) for c in HE.NOPO]
+
+Z = (NOPO[(NOPO["transform"] == REF_TF) & (NOPO["covset"] == REF_CS)
+          & NOPO["estimator"].isin(CONTRASTS)]
+     .pivot_table(index="phenotype", columns="estimator", values="z").reindex(ORDER)[CONTRASTS])
+
+DESIGNS = {
+    "h2_OneSlope":        (lambda a: a[:, None], [(-np.inf, HE.R_HI)]),
+    "h2_Rel":             (lambda a: np.c_[a * (a < HE.U_HI), a * (a >= HE.U_HI)],
+                           [(-np.inf, HE.R_HI)]),
+    "h2_OneSlopeOffsets": (lambda a: np.c_[a, HE_offsets(a)],
+                           [(-np.inf, HE.U_HI), (HE.T_HI, HE.R_HI)]),
+    "h2_RelOffsets":      (lambda a: np.c_[a * (a < HE.U_HI), a * (a >= HE.U_HI), HE_offsets(a)],
+                           [(-np.inf, HE.U_HI), (HE.T_HI, HE.R_HI)]),
+}
+
+
+def HE_offsets(a):
+    return np.column_stack([HE._ind(a, lo, hi) for lo, hi in HE.DEG_BANDS.values()])
+
+
+def chi2_per_bin(tag):
+    """Per-rung chi-square per bin of the noPO bin means, and the fitted df."""
+    S, N = HE.load_arrays(f"{MERGED_DIR}/{tag}_merged.full.tsv",
+                          f"{MERGED_DIR}/{tag}_merged.jk.tsv", len(MID), NBLOCKS)
+    s, n = S[:, NOPO_CLS].sum(1), N[:, NOPO_CLS].sum(1)          # (1 + NBLOCKS, nbins)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        m = np.where(n > 0, s / n, np.nan)
+    reps = m[1:]
+    se = np.sqrt((NBLOCKS - 1) / NBLOCKS * np.nansum((reps - np.nanmean(reps, 0)) ** 2, 0))
+    out = {}
+    for name, (design, ranges) in DESIGNS.items():
+        inside = np.zeros(len(MID), dtype=bool)
+        for lo, hi in ranges:
+            inside |= (MID >= lo) & (MID < hi)
+        k = inside & (n[0] > 0) & np.isfinite(m[0]) & (se > 0)
+        X, y, w = design(MID[k]), m[0][k], n[0][k]
+        beta = HE._wls(X, y, w)
+        if beta is None:
+            out[name] = (np.nan, np.nan)
+            continue
+        chi2 = float((((y - X @ beta) / se[k]) ** 2).sum())
+        out[name] = (chi2 / max(k.sum() - X.shape[1], 1), k.sum() - X.shape[1])
+    return out
+
+
+C = pd.DataFrame({ph: {k: v[0] for k, v in chi2_per_bin(
+    f"{ph}__{REF_TF}__{REF_CS}__{CLASS_TAG}__{BIN_TAG}").items()}
+    for ph in ORDER}).T[RUNGS]
+C.to_csv(f"{OUT}/fit_chi2_per_bin.tsv", sep="\t")
+
+fig, axes = plt.subplots(1, 2, figsize=(15, 0.28 * len(ORDER) + 2),
+                         gridspec_kw={"width_ratios": [1, 1.25]})
+im = axes[0].imshow(Z.to_numpy(), aspect="auto", cmap="RdBu_r",
+                    norm=TwoSlopeNorm(vcenter=0, vmin=-np.nanmax(np.abs(Z.to_numpy())),
+                                      vmax=np.nanmax(np.abs(Z.to_numpy()))))
+axes[0].set_xticks(range(len(CONTRASTS)))
+axes[0].set_xticklabels([c.replace("diff_", "") for c in CONTRASTS], rotation=20, ha="right", fontsize=8)
+axes[0].set_yticks(range(len(Z)))
+axes[0].set_yticklabels(Z.index, fontsize=7)
+for lab in axes[0].get_yticklabels():
+    lab.set_color(CAT_COL[CATEGORY.get(lab.get_text(), "uncategorised")])
+axes[0].set_title("z of each contrast", fontsize=10)
+fig.colorbar(im, ax=axes[0], fraction=0.05, pad=0.03, label="z")
+
+bw = 0.8 / len(RUNGS)
+for r, name in enumerate(RUNGS):
+    axes[1].barh(np.arange(len(C)) - 0.4 + bw * (r + 0.5), C[name], height=bw,
+                 color=plt.cm.viridis(r / (len(RUNGS) - 1)), label=name)
+axes[1].axvline(1, color="grey", ls=":", lw=1)
+axes[1].set_yticks(range(len(C)))
+axes[1].set_yticklabels([])
+axes[1].set_ylim(-0.6, len(C) - 0.4)
+axes[1].set_xscale("log")
+axes[1].set_xlabel("chi-square per bin (1 = bins fit within their own noise)")
+axes[1].legend(fontsize=8)
+axes[1].set_title("fit of each rung to the binned means", fontsize=10)
+fig.suptitle(f"statistical support — {SAMPLE_SET}, {REF_TF}, {REF_CS}, noPO")
+plt.tight_layout()
+plt.savefig(f"{OUT}/plots/model_support.png", dpi=130, bbox_inches="tight")
+plt.show()
+
+print("change in chi-square per bin between nested rungs (positive = the added term helps)")
+print(pd.DataFrame({"offsets, one slope": C["h2_OneSlope"] - C["h2_OneSlopeOffsets"],
+                    "offsets, two slopes": C["h2_Rel"] - C["h2_RelOffsets"],
+                    "second slope, no offsets": C["h2_OneSlope"] - C["h2_Rel"],
+                    "second slope, with offsets": C["h2_OneSlopeOffsets"] - C["h2_RelOffsets"]})
+      .round(2).to_string())
+```
+
 ## Cell 6 — per-phenotype fits with a coefficient panel
 
 `FIT_TF` only, all covariate sets. Left: binned means (hue = pair class, shade
@@ -255,8 +364,10 @@ def coef_panel(ax, ph, rows):
         for i, name in enumerate(rows):
             est, se = coef(ph, cs, name)
             if np.isfinite(est):
+                sig = not (np.isfinite(se) and abs(est) <= se)
                 ax.errorbar(est, len(rows) - 1 - i + dy, xerr=se if np.isfinite(se) else None,
-                            fmt="o", ms=4, color=col, ecolor=col, elinewidth=0.8, mec="0.3", mew=0.3)
+                            fmt="o", ms=4, color=col, ecolor=col, elinewidth=0.8,
+                            mfc=col if sig else "none", mec=col if not sig else "0.3", mew=0.6)
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(rows[::-1], fontsize=8)
     ax.set_ylim(-0.6, len(rows) - 0.4)
