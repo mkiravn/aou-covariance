@@ -21,13 +21,17 @@ H2, B_HS, B_FS, B_PO = 0.5, 0.02, 0.05, 0.0     # intercepts on the cross-produc
 def truth(cls, a):
     m = H2 * a
     if cls == "other":
-        return m + np.where((a >= 0.2) & (a < 0.4), B_HS, 0.0)
+        return m + np.where((a >= 0.2) & (a < 0.36), B_HS, 0.0)
     return m + (B_FS if cls == "FS" else B_PO)
 
 
 def present(cls, a):
+    # "other" is absent from 0.18-0.2 and 0.36-0.4 so the HS offset fills both
+    # the b2_step band (0.2-0.4) and the deg2 band (0.18-0.36) exactly
     related = (a >= 0.4) & (a < 0.6)
-    return ~related if cls == "other" else related
+    if cls == "other":
+        return (a < 0.18) | ((a >= 0.2) & (a < 0.36)) | (a >= 0.7)
+    return related
 
 
 def build(out_dir, mid, noise):
@@ -63,6 +67,8 @@ def main():
 
     expect = {
         ("h2_Unrel", "noPO"): H2,
+        ("h2_UnrelInt", "noPO"): H2,
+        ("Unrel.intercept", "noPO"): 0.0,
         ("b2_FS", "noPO"): 2 * B_FS,
         ("b2_FS", "PO"): 2 * B_PO,
         ("h2_Pedf", "noPO"): H2,
@@ -70,12 +76,22 @@ def main():
         ("b2_step_ratio", "noPO"): B_FS / B_HS,
         ("excess", "FS"): B_FS,
         ("excess", "PO"): B_PO,
+        ("h2_OneSlopeOffsets", "noPO"): H2,
+        ("h2_RelOffsets", "noPO"): H2,
+        ("diff_RelOffsets-Unrel", "noPO"): 0.0,
+        # PO and FS pairs share bins in equal numbers, so pooling averages
+        # their offsets and leaves the slope untouched
+        ("h2_RelOffsets", "pooled"): H2,
+        ("RelOffsets.deg1", "pooled"): (B_FS + B_PO) / 2,
     }
+    for model in ("OneSlopeOffsets", "RelOffsets"):
+        expect.update({(f"{model}.deg4", "noPO"): 0.0, (f"{model}.deg3", "noPO"): 0.0,
+                       (f"{model}.deg2", "noPO"): B_HS, (f"{model}.deg1", "noPO"): B_FS})
     fails = 0
     for key, want in expect.items():
         ok = abs(got[key] - want) < 1e-9
         fails += not ok
-        print(f"{'OK  ' if ok else 'FAIL'} {key[0]:<14}{key[1]:<7} "
+        print(f"{'OK  ' if ok else 'FAIL'} {key[0]:<24}{key[1]:<7} "
               f"got {got[key]:+.6f}  want {want:+.6f}")
 
     # biased by design; check the direction of the bias
@@ -84,9 +100,15 @@ def main():
          "slope through the origin absorbs the FS intercept"),
         (("b2_FS", "pooled"), 2 * B_PO < got[("b2_FS", "pooled")] < 2 * B_FS,
          "PO pairs dilute the FS shared-environment estimate"),
+        (("h2_Rel", "noPO"), got[("h2_Rel", "noPO")] > H2,
+         "without offsets the related slope absorbs the HS and FS intercepts"),
+        (("diff_Rel-RelOffsets", "noPO"), got[("diff_Rel-RelOffsets", "noPO")] > 0,
+         "offsets remove that excess"),
+        (("h2_OneSlope", "noPO"), H2 < got[("h2_OneSlope", "noPO")] < got[("h2_Rel", "noPO")],
+         "one slope sits between the unrelated and related slopes"),
     ):
         fails += not cond
-        print(f"{'OK  ' if cond else 'FAIL'} {key[0]:<14}{key[1]:<7} "
+        print(f"{'OK  ' if cond else 'FAIL'} {key[0]:<24}{key[1]:<7} "
               f"{got[key]:+.6f}  ({msg})")
 
     S, N = E.load_arrays(*build(tmp, mid, 0.002), len(mid), NBLOCKS)
