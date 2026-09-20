@@ -128,7 +128,7 @@ LD_REGIONS = f"{LOCAL}/high_ld_regions_grch38.txt"
 open(LD_REGIONS, "w").write(HIGH_LD_REGIONS_GRCH38)
 
 sh(f"""
-plink2 --pfile {q(f'{LOCAL}/panel')} --keep {q(ROUND1_KEEP)} \
+plink2 --pfile {q(f'{LOCAL}/panel')} --keep {q(ROUND1_KEEP)} --nonfounders \
   --maf 0.01 --hwe 1e-6 0 keep-fewhet --geno 0.05 --max-alleles 2 --rm-dup exclude-all \
   --threads {N_THREADS} --make-pgen --out {q(f'{LOCAL}/r1_qc')}
 
@@ -138,7 +138,7 @@ LC_ALL=C comm -12 {q(f'{LOCAL}/r1_ira.sorted')} {q(f'{LOCAL}/kg_ira.sorted')} | 
 echo "HM3-agreeing: $(wc -l < {q(f'{LOCAL}/hm3_agreeing.ids')})"
 
 plink2 --pfile {q(f'{LOCAL}/r1_qc')} --extract {q(f'{LOCAL}/hm3_agreeing.ids')} \
-  --exclude range {q(LD_REGIONS)} --indep-pairwise 1000 50 0.1 \
+  --exclude range {q(LD_REGIONS)} --nonfounders --indep-pairwise 1000 50 0.1 \
   --threads {N_THREADS} --out {q(f'{LOCAL}/prune')}
 
 plink2 --pfile {q(f'{LOCAL}/r1_qc')} --extract {q(f'{LOCAL}/prune.prune.in')} \
@@ -151,7 +151,7 @@ print("PCA variants:", sum(1 for _ in open(f"{LOCAL}/prune.prune.in")))
 
 ```python
 sh(f"""
-plink2 --pfile {q(f'{LOCAL}/pca_input')} --freq counts \
+plink2 --pfile {q(f'{LOCAL}/pca_input')} --nonfounders --freq counts \
   --pca approx {N_PCS_FIT} allele-wts --threads {N_THREADS} \
   --out {q(f'{LOCAL}/round2_pca')}
 """)
@@ -355,7 +355,7 @@ eur_ids.to_csv(f"{LOCAL}/kg_eur.keep", index=False, header=False)
 
 sh(f"""
 plink2 --bfile {q(KG_BFILE)} --keep {q(f'{LOCAL}/kg_eur.keep')} \
-  --extract {q(f'{LOCAL}/kg_project.ids')} --freq counts \
+  --extract {q(f'{LOCAL}/kg_project.ids')} --nonfounders --freq counts \
   --pca {N_PCS_FIT} allele-wts --threads {N_THREADS} --out {q(f'{LOCAL}/kgeur_pca')}
 """)
 sh(score_cmd("--pfile", f"{LOCAL}/pca_input", f"{LOCAL}/kgeur_pca.eigenvec.allele",
