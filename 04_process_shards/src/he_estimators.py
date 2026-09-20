@@ -117,14 +117,14 @@ def estimates(S, N, r, mid):
         fit(label, classes, [(0.4, 0.6)], origin, {"h2_FS": lambda b: b[0]})
         # shared environment among first-degree pairs
         fit(label, classes, [(0.4, 0.6)], lambda a: np.c_[a, np.ones_like(a)],
-            {"b2_FS": lambda b: 2 * b[1]})
+            {"b2_FS": lambda b: 2 * b[1], "b2_FS.slope": lambda b: b[0]})
 
     band_readouts = lambda model, first: {f"{model}.{d}": (lambda b, i=first + j: b[i])
                                           for j, d in enumerate(DEG_BANDS)}
     for label, classes in (("noPO", NOPO), ("pooled", POOLED)):
         # quadratic absorbs non-linearity (Wainschtein et al. 2025)
         fit(label, classes, [(0.05, 0.7)], lambda a: np.c_[a, a ** 2],
-            {"h2_PedW25": lambda b: b[0]})
+            {"h2_PedW25": lambda b: b[0], "PedW25.quad": lambda b: b[1]})
         # intercept offsets at pedigree-class transitions
         fit(label, classes, [(0.05, 0.7)],
             lambda a: np.c_[a, _ind(a, .1, .2), _ind(a, .2, .4), _ind(a, .4, .6)],

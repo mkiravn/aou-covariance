@@ -160,7 +160,11 @@ sh(f"cp {q(f'{LOCAL}/round2_pca.eigenval')} {q(f'{LOCAL}/round2_pca.eigenvec.all
 print(open(f"{LOCAL}/round2_pca.eigenval").read())
 ```
 
-## Cell 6 — project 1000G into that space, pick K
+## Cell 6 — score everyone through the same loadings, pick K
+
+plink's `--pca` eigenvectors and a `--score` projection do not land on the
+same coordinates, so participants are re-scored through their own loadings
+rather than read from the eigenvec. Both sets then sit on identical axes.
 
 ```python
 def score_cmd(bfile_flag, prefix, weights, freq, out, extract=None):
@@ -185,6 +189,8 @@ echo "variants for the 1000G projection: $(wc -l < {q(f'{LOCAL}/kg_project.ids')
 """)
 sh(score_cmd("--bfile", KG_BFILE, f"{LOCAL}/round2_pca.eigenvec.allele",
              f"{LOCAL}/round2_pca.acount", f"{LOCAL}/kg_in_r2", f"{LOCAL}/kg_project.ids"))
+sh(score_cmd("--pfile", f"{LOCAL}/pca_input", f"{LOCAL}/round2_pca.eigenvec.allele",
+             f"{LOCAL}/round2_pca.acount", f"{LOCAL}/part_in_r2"))
 
 PC = [f"PC{k}" for k in range(1, N_PCS_FIT + 1)]
 
@@ -199,9 +205,7 @@ def read_scores(path, id_name):
 
 kg = read_scores(f"{LOCAL}/kg_in_r2.sscore", "sample").merge(
     pd.read_csv(KG_PANEL, sep=r"\s+")[["sample", "pop", "super_pop"]], on="sample", how="left")
-part = pd.read_csv(f"{LOCAL}/round2_pca.eigenvec", sep=r"\s+")
-part = part.rename(columns={("#IID" if "#IID" in part.columns else "IID"): "person_id"})
-part["person_id"] = part["person_id"].astype(str)
+part = read_scores(f"{LOCAL}/part_in_r2.sscore", "person_id")
 
 ev = np.loadtxt(f"{LOCAL}/round2_pca.eigenval")
 sep = [np.abs(kg[kg["pop"].isin(ANCHOR_POPS)][p].mean()
@@ -218,6 +222,47 @@ plt.tight_layout(); plt.savefig(f"{OUT}/scree.png", dpi=130, bbox_inches="tight"
 
 `anchor_vs_other_EUR` is how far the anchor sits from the other European
 populations on each PC, in participant SDs. Use the PCs where it is large.
+
+## Cell 6b — loadings
+
+Loading² by genomic position. A PC carried by one region is an inversion, an
+LD block or a mapping artefact, not structure.
+
+```python
+L = pd.read_csv(f"{LOCAL}/round2_pca.eigenvec.allele", sep=r"\s+")
+idc = "#ID" if "#ID" in L.columns else "ID"
+L[["CHROM", "POS"]] = L[idc].str.split(":", n=2, expand=True).iloc[:, :2]
+L["CHROM"] = L["CHROM"].str.replace("chr", "", regex=False)
+L = L[L["CHROM"].isin([str(c) for c in range(1, 23)])].copy()
+L["CHROM"] = pd.Categorical(L["CHROM"], categories=[str(c) for c in range(1, 23)], ordered=True)
+L["POS"] = L["POS"].astype(int)
+L = L.sort_values(["CHROM", "POS"])
+
+offset, centres = 0, {}
+cum = np.empty(len(L))
+for c, idx in L.groupby("CHROM", observed=True).indices.items():
+    p = L["POS"].to_numpy()[idx]
+    cum[idx] = p + offset
+    centres[c] = offset + p.max() / 2
+    offset += p.max()
+L["CUM"] = cum
+
+n_show = min(K_PCS, 4)
+fig, axes = plt.subplots(n_show, 1, figsize=(14, 2.4 * n_show), sharex=True)
+for ax, p in zip(np.atleast_1d(axes), PC[:n_show]):
+    for k, c in enumerate(centres):
+        s = L[L["CHROM"] == c]
+        ax.scatter(s["CUM"], s[p] ** 2, s=2, alpha=0.5,
+                   color=["tab:blue", "tab:orange"][k % 2], rasterized=True)
+    ax.set_ylabel(f"{p} loading²")
+np.atleast_1d(axes)[-1].set_xticks(list(centres.values()))
+np.atleast_1d(axes)[-1].set_xticklabels(list(centres), fontsize=7)
+np.atleast_1d(axes)[-1].set_xlabel("chromosome")
+fig.suptitle(f"{SAMPLE_SET} round 2 — PCA loadings")
+plt.tight_layout()
+plt.savefig(f"{OUT}/loadings.png", dpi=130, bbox_inches="tight")
+plt.show()
+```
 
 ## Cell 7 — the gate
 
@@ -258,10 +303,19 @@ print(f"{int(keep.sum()):,} kept -> {KEEP_PATH}")
 ## Cell 8 — plots
 
 ```python
+from matplotlib.patches import Ellipse
+
 PAIRS = [(0, 1), (2, 3)]
 rng = np.random.default_rng(0)
 shown = rng.choice(np.flatnonzero(keep), size=min(50_000, int(keep.sum())), replace=False)
 cols = dict(zip(EUR_POPS, plt.cm.tab10.colors))
+
+
+def gate_ellipse(ax, centre, i, j, radius, **kw):
+    """Gate boundary on PCs i, j: axis-aligned, scaled by the participant SDs."""
+    ax.add_patch(Ellipse((centre[i], centre[j]), 2 * radius * sd[i], 2 * radius * sd[j],
+                         fill=False, **kw))
+
 
 fig, axes = plt.subplots(1, len(PAIRS), figsize=(15, 6.5))
 for ax, (i, j) in zip(axes, PAIRS):
@@ -273,6 +327,8 @@ for ax, (i, j) in zip(axes, PAIRS):
         s = kg[kg["pop"] == pop]
         ax.scatter(s[a], s[b], s=30 if pop in ANCHOR_POPS else 16, marker="x",
                    color=cols[pop], label=pop, zorder=2)
+    if i < K_PCS and j < K_PCS:
+        gate_ellipse(ax, mu, i, j, THRESHOLD, edgecolor="tab:blue", lw=1.4, zorder=3)
     ax.set_xlabel(a); ax.set_ylabel(b)
 axes[0].legend(fontsize=8, markerscale=1.4)
 fig.suptitle(f"{SAMPLE_SET} round 2 — kept (blue) among the round-1 set (grey), 1000G Europeans (crosses)")
@@ -343,6 +399,10 @@ for ax, (i, j) in zip(axes, PAIRS):
     for pop in ANCHOR_POPS:
         s = kg[kg["pop"] == pop]
         ax.scatter(s[a], s[b], s=30, marker="x", color="k", zorder=3)
+    if i < K_PCS and j < K_PCS:
+        gate_ellipse(ax, mu, i, j, THRESHOLD, edgecolor="tab:blue", lw=1.4, zorder=4)
+        gate_ellipse(ax, part[USE].mean().to_numpy(), i, j, np.sort(d_self)[TARGET_N - 1],
+                     edgecolor="tab:orange", lw=1.4, ls="--", zorder=4)
     ax.set_xlabel(a); ax.set_ylabel(b)
 axes[0].legend(fontsize=8, markerscale=4)
 fig.suptitle("who the anchor changes, against the participants' own centroid")

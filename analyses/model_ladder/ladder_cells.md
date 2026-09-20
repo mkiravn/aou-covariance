@@ -347,6 +347,7 @@ CMAP  = {"other": plt.cm.Blues, "FS": plt.cm.Oranges, "PO": plt.cm.Purples}
 MARK  = {"other": "o", "FS": "s", "PO": "^"}
 SHADE = dict(zip(COVSETS, np.linspace(0.45, 0.95, len(COVSETS))))
 MS, XLIM = 5, (-0.06, 1.12)
+FIT_CS = REF_CS            # fitted lines drawn for this covariate set only
 H2_ROWS = ["h2_Unrel", "h2_OneSlope", "h2_Rel", "h2_OneSlopeOffsets",
            "h2_RelOffsets", "h2_FS", "h2_PedW25"]
 B2_ROWS = ["b2_FS", "b2_step"]
@@ -398,16 +399,33 @@ for ph in ORDER:
                 ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt=MARK[cls], ms=MS,
                             color=col, lw=0, elinewidth=0.6, capsize=0, ecolor=col, alpha=0.85,
                             mec="0.3", mew=0.4, zorder=2 if cls == "other" else 4)
-        h2u = coef(ph, cs, "h2_Unrel")[0]
-        if np.isfinite(h2u):
-            xs = np.array(XLIM)
-            ax.plot(xs, h2u * xs, "--", lw=1, color=CMAP["other"](SHADE[cs]), alpha=0.8, zorder=3)
-        beta_r = coef(ph, cs, "h2_RelOffsets")[0]
-        for d, (lo, hi) in HE.DEG_BANDS.items():
-            off = coef(ph, cs, f"RelOffsets.{d}")[0]
-            if np.isfinite(beta_r) and np.isfinite(off):
-                xs = np.array([lo, hi])
-                ax.plot(xs, beta_r * xs + off, "-", lw=1.6, color=plt.cm.Greys(SHADE[cs]), zorder=5)
+    # fits for one covariate set only, so the lines stay readable
+    cs = FIT_CS if FIT_CS in tables else next(iter(tables))
+    g = lambda name: coef(ph, cs, name)[0]
+    xs = np.array(XLIM)
+    fits = []
+    if np.isfinite(g("h2_Unrel")):
+        fits.append((xs, g("h2_Unrel") * xs, "--", r"$h^2_{Unrel}$"))
+    if np.isfinite(g("h2_OneSlope")):
+        fits.append((xs, g("h2_OneSlope") * xs, ":", r"$h^2_{OneSlope}$"))
+    if np.isfinite(g("h2_Rel")):
+        hi = np.array([HE.U_HI, HE.R_HI])
+        fits.append((hi, g("h2_Rel") * hi, "-.", r"$h^2_{Rel}$"))
+    if np.isfinite(g("h2_PedW25")):
+        a = np.linspace(0.05, HE.R_HI, 100)
+        fits.append((a, g("h2_PedW25") * a + g("PedW25.quad") * a ** 2, (0, (3, 1, 1, 1)),
+                     r"$h^2_{Ped,W25}$"))
+    for k, (d, (lo, hi)) in enumerate(HE.DEG_BANDS.items()):
+        off = g(f"RelOffsets.{d}")
+        if np.isfinite(g("h2_RelOffsets")) and np.isfinite(off):
+            a = np.array([lo, hi])
+            fits.append((a, g("h2_RelOffsets") * a + off, "-",
+                         r"$h^2_{RelOffsets}$ + band" if k == 0 else None))
+    if np.isfinite(g("b2_FS")):
+        a = np.array([0.4, 0.6])
+        fits.append((a, g("b2_FS.slope") * a + g("b2_FS") / 2, (0, (1, 1)), r"$b^2_{FS}$ fit"))
+    for x, y, ls, lab in fits:
+        ax.plot(x, y, ls=ls, lw=0.9, color="0.35", alpha=0.75, zorder=5, label=lab)
 
     for lo, _ in HE.DEG_BANDS.values():
         ax.axvline(lo, color="0.85", lw=0.6, zorder=0)
@@ -422,8 +440,8 @@ for ph in ORDER:
 
     cls_h = [Line2D([], [], lw=0, marker=MARK[c], ms=MS + 1, mfc=CMAP[c](0.75), mec="0.3", label=c)
              for c in ("other", "FS", "PO")]
-    fit_h = [Line2D([], [], ls="--", color=CMAP["other"](0.7), label=r"$h^2_{Unrel}\,a$"),
-             Line2D([], [], ls="-", lw=1.6, color="0.4", label="RelOffsets fit")]
+    fit_h = [Line2D([], [], ls=ls, lw=0.9, color="0.35", label=lab)
+             for _, _, ls, lab in fits if lab]
     cov_h = [Line2D([], [], color=plt.cm.Greys(SHADE[cs]), lw=4, label=cs) for cs in tables]
     leg = ax.legend(handles=cls_h + fit_h, fontsize=8, loc="upper left", framealpha=.9)
     ax.add_artist(leg)
