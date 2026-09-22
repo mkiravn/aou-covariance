@@ -187,6 +187,57 @@ plt.show()
 large for a continuum. `spread` compares the selected participants' dispersion
 with the reference's, at the narrowest width.
 
+## Cell 3b — which reference populations land in each gate
+
+Rows are reference populations, columns are gates, cells are the percentage of
+that population's founders falling inside. A gate holds its own populations by
+construction, at the width's coverage; the informative part is everything off
+that diagonal, which is where gates reach into groups they don't represent.
+Reference samples are public, so counts are unsuppressed.
+
+```python
+W_CHECK = WIDTHS[0]
+EXTRA_POPS = ["ASW", "ACB"]          # in neither gate, shown for context
+
+pops_shown = [p for ps in GATES.values() for p in ps] + [
+    p for p in EXTRA_POPS if p in set(ref["pop"])]
+rows_ = []
+for p in pops_shown:
+    m = gate_rows([p])
+    if not m.any():
+        continue
+    row = {"population": p, "founders": int(m.sum()),
+           "in GATES": next((g for g, ps in GATES.items() if p in ps), "—")}
+    for g in GATES:
+        mu, C = centre[g]
+        row[g] = 100 * (mahalanobis(R[m], mu, C) <= radius[(g, W_CHECK)]).mean()
+    rows_.append(row)
+P = pd.DataFrame(rows_).set_index("population")
+P.to_csv(f"{OUT}/reference_in_gates_{W_CHECK * 100:g}pct.tsv", sep="\t")
+print(P.round(1).to_string())
+
+fig, ax = plt.subplots(figsize=(1.1 * len(GATES) + 3, 0.28 * len(P) + 2))
+im = ax.imshow(P[list(GATES)].to_numpy(), vmin=0, vmax=100, cmap="Blues", aspect="auto")
+for i in range(len(P)):
+    for j, g in enumerate(GATES):
+        v = P.iloc[i][g]
+        if v >= 1:
+            ax.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=7,
+                    color="white" if v > 60 else "black")
+ax.set_xticks(range(len(GATES)))
+ax.set_xticklabels(list(GATES))
+for lab in ax.get_xticklabels():
+    lab.set_color(GCOL[lab.get_text()])
+ax.set_yticks(range(len(P)))
+ax.set_yticklabels([f"{p}  ({P.loc[p, 'in GATES']})" for p in P.index], fontsize=8)
+ax.tick_params(length=0)
+fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="% of the population's founders inside")
+ax.set_title(f"reference populations inside each gate at {pct(W_CHECK)}")
+plt.tight_layout()
+plt.savefig(f"{OUT}/reference_in_gates_{W_CHECK * 100:g}pct.png", dpi=130, bbox_inches="tight")
+plt.show()
+```
+
 ## Cell 4 — all gates in PC space
 
 ```python
