@@ -5,13 +5,15 @@ keeps those closest to the CEU + GBR centroid. Two alternative gates are built
 for comparison: the participants' own centroid (as eur_D2 did), and the Kemper
 direction, PCA fit on the 1000G Europeans with participants projected in.
 
-Location comes from the reference, scale from the participants (projected
-scores shrink, so the reference spread is not used), size from a target.
+The gate is a multivariate normal model of the anchor population, assembled
+from the part of each estimate that is trustworthy: **centre** and **shape**
+from the projected CEU + GBR samples, **scale** from the participants, **size**
+from a target. Projection shrinks each PC by its own factor, which biases the
+anchor's variances but cancels in its correlations, so the correlation matrix is
+taken from the anchor and the per-PC variances from the participants.
 
-The gate is diagonal here, and that is the full multivariate normal model, not
-a simplification: the PCA is fit on these participants, so their scores are
-uncorrelated by construction and `--score` only rescales each PC. Cell 7 checks
-that the off-diagonal correlations really are negligible.
+Participants are uncorrelated on their own PCs by construction, so any tilt in
+the gate comes from the anchor's shape, not theirs. Cell 7 checks both.
 
 Compute: 16 vCPU, ~100 GB RAM, ~500 GB disk. The PCA fit is the long step.
 
@@ -274,19 +276,28 @@ plt.show()
 Centroid from the projected anchor populations, scale from the participants.
 
 ```python
+SHRINK = 0.2            # anchor correlations toward independence; a few hundred samples
+
 USE = PC[:K_PCS]
 anchor = kg[kg["pop"].isin(ANCHOR_POPS)]
 mu = anchor[USE].mean().to_numpy()
 sd = part[USE].std(ddof=1).to_numpy()
 
-# participants are uncorrelated on their own PCs, so a diagonal metric is exact
-off = np.abs(np.corrcoef(part[USE].to_numpy(), rowvar=False) - np.eye(K_PCS)).max()
-print(f"largest off-diagonal correlation among participants on PC1-{K_PCS}: {off:.3f}")
-assert off < 0.05, "participant PCs are correlated; the diagonal metric is not exact here"
+off_part = np.abs(np.corrcoef(part[USE].to_numpy(), rowvar=False) - np.eye(K_PCS)).max()
+Ra = np.corrcoef(anchor[USE].to_numpy(), rowvar=False)
+off_anchor = np.abs(Ra - np.eye(K_PCS)).max()
+print(f"largest off-diagonal correlation: participants {off_part:.3f}, anchor {off_anchor:.3f} "
+      f"({len(anchor)} anchor samples)")
+assert off_part < 0.05, "participant PCs are correlated; the PCA fit sample is not what we think"
+
+Ra = (1 - SHRINK) * Ra + SHRINK * np.eye(K_PCS)
+C = np.outer(sd, sd) * Ra            # anchor shape, participant scale
+Cinv = np.linalg.inv(C)
 
 
 def distance(frame, centre):
-    return np.sqrt((((frame[USE].to_numpy() - centre) / sd) ** 2).sum(1))
+    d = frame[USE].to_numpy() - centre
+    return np.sqrt(np.einsum("ij,jk,ik->i", d, Cinv, d))
 
 
 d_anchor = distance(part, mu)
@@ -305,7 +316,8 @@ with open(f"{OUT}/round2_provenance.txt", "w") as f:
     f.write(f"pca\tfit on the round-1 set, plink2 --pca approx {N_PCS_FIT} allele-wts\n"
             f"variants\t{sum(1 for _ in open(f'{LOCAL}/prune.prune.in'))} pruned HM3 sites\n"
             f"anchor\t1000G {'+'.join(ANCHOR_POPS)} projected into that space\n"
-            f"pcs\t1-{K_PCS}\nscale\tparticipant SD per PC\n"
+            f"pcs\t1-{K_PCS}\n"
+            f"metric\tMahalanobis: anchor correlations (shrunk {SHRINK:g}), participant SDs\n"
             f"threshold\t{THRESHOLD:.6f}\nkept\t{int(keep.sum())}\n")
 print(f"{int(keep.sum()):,} kept -> {KEEP_PATH}")
 ```
@@ -322,8 +334,13 @@ cols = dict(zip(EUR_POPS, plt.cm.tab10.colors))
 
 
 def gate_ellipse(ax, centre, i, j, radius, **kw):
-    """Gate boundary on PCs i, j: axis-aligned, scaled by the participant SDs."""
-    ax.add_patch(Ellipse((centre[i], centre[j]), 2 * radius * sd[i], 2 * radius * sd[j],
+    """Gate boundary on PCs i, j: the ellipsoid's shadow, from the 2x2 marginal
+    covariance, so it tilts with the anchor's correlation structure."""
+    M = C[np.ix_([i, j], [i, j])]
+    vals, vecs = np.linalg.eigh(M)
+    ax.add_patch(Ellipse((centre[i], centre[j]), 2 * radius * np.sqrt(vals[-1]),
+                         2 * radius * np.sqrt(vals[0]),
+                         angle=np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1])),
                          fill=False, **kw))
 
 
@@ -378,7 +395,10 @@ kg_k = kg_k.merge(pd.read_csv(KG_PANEL, sep=r"\s+")[["sample", "pop"]], on="samp
 
 mu_k = kg_k[kg_k["pop"].isin(ANCHOR_POPS)][USE].mean().to_numpy()
 sd_k = part_k[USE].std(ddof=1).to_numpy()
-d_k = np.sqrt((((part_k[USE].to_numpy() - mu_k) / sd_k) ** 2).sum(1))
+Rk = np.corrcoef(kg_k[kg_k["pop"].isin(ANCHOR_POPS)][USE].to_numpy(), rowvar=False)
+Ck_inv = np.linalg.inv(np.outer(sd_k, sd_k) * ((1 - SHRINK) * Rk + SHRINK * np.eye(K_PCS)))
+dk = part_k[USE].to_numpy() - mu_k
+d_k = np.sqrt(np.einsum("ij,jk,ik->i", dk, Ck_inv, dk))
 keep_kemper = pd.Series(d_k <= np.sort(d_k)[TARGET_N - 1], index=part_k["person_id"]).reindex(
     part["person_id"]).fillna(False).to_numpy()
 
