@@ -5,7 +5,7 @@ keeps those closest to the CEU + GBR centroid. Two alternative gates are built
 for comparison: the participants' own centroid (as eur_D2 did), and the Kemper
 direction, PCA fit on the 1000G Europeans with participants projected in.
 
-The gate is a multivariate normal model of the anchor population: mean and
+The gate is a multivariate normal fitted to the anchor population: mean and
 covariance from the projected CEU + GBR samples, Mahalanobis distance under it,
 and a radius tuned to the target size. Same form as round 1, and the same idea
 as Kemper, who kept UK Biobank participants by their probability of belonging
@@ -280,14 +280,10 @@ USE = PC[:K_PCS]
 
 
 def mvn(frame):
-    """Mean and shrunk covariance of these samples on the PCs in use."""
+    """Mean and covariance of these samples on the PCs in use."""
     A = frame[USE].to_numpy()
-    try:
-        from sklearn.covariance import LedoitWolf
-        return A.mean(0), LedoitWolf().fit(A).covariance_
-    except ImportError:                      # same shrinkage target, fixed weight
-        S_ = np.cov(A, rowvar=False)
-        return A.mean(0), 0.9 * S_ + 0.1 * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
+    assert len(A) > 2 * K_PCS, f"too few samples for a {K_PCS}x{K_PCS} covariance"
+    return A.mean(0), np.cov(A, rowvar=False)
 
 
 def distance(frame, mu, C):
@@ -316,7 +312,7 @@ with open(f"{OUT}/round2_provenance.txt", "w") as f:
             f"variants\t{sum(1 for _ in open(f'{LOCAL}/prune.prune.in'))} pruned HM3 sites\n"
             f"anchor\t1000G {'+'.join(ANCHOR_POPS)} projected into that space\n"
             f"pcs\t1-{K_PCS}\n"
-            f"metric\tMahalanobis under the anchor's own shrunk covariance\n"
+            f"metric\tMahalanobis under the anchor's own covariance\n"
             f"threshold\t{THRESHOLD:.6f}\nkept\t{int(keep.sum())}\n")
 print(f"{int(keep.sum()):,} kept -> {KEEP_PATH}")
 ```

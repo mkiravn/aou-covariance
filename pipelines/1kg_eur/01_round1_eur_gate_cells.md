@@ -5,12 +5,10 @@ populations in AoU's ancestry PCs. Same gate as the ancestry survey's EUR
 group; this writes it into the sample set's own folder.
 
 **The distance.** Mahalanobis distance to the European reference centroid over
-PCs 1–5, under the reference founders' own covariance: a multivariate normal
-model of that cloud, so the gate follows its shape and orientation rather than
-a sphere. The covariance is shrunk toward a sphere, since a 5×5 covariance from
-a few hundred founders is otherwise noisy enough to stretch the gate along a
-direction that is only sampling error. Width 1× is the distance that holds 99%
-of the reference founders themselves, and wider gates scale that radius.
+PCs 1–5, under the reference founders' own mean and covariance: a multivariate
+normal fitted to that cloud, so the gate follows its shape and orientation
+rather than a sphere. Width 1× is the distance that holds 99% of the reference
+founders themselves, and wider gates scale that radius.
 
 **No AoU label enters the selection.** From `ancestry_preds.tsv` this notebook
 reads only `research_id` and `pca_features`. The centroid, the SDs and the
@@ -105,14 +103,9 @@ participants within `WIDTH` × that. Inputs here are the PC matrix and the
 
 ```python
 Rg = R[is_eur, :N_PCS]
-mu = Rg.mean(0)
-try:
-    from sklearn.covariance import LedoitWolf
-    C = LedoitWolf().fit(Rg).covariance_
-except ImportError:                      # same shrinkage target, fixed weight
-    S_ = np.cov(Rg, rowvar=False)
-    C = 0.9 * S_ + 0.1 * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
+mu, C = Rg.mean(0), np.cov(Rg, rowvar=False)
 Cinv = np.linalg.inv(C)
+print(f"covariance from {len(Rg)} founders over {N_PCS} PCs")
 dist = lambda Z: np.sqrt(np.einsum("ij,jk,ik->i", Z[:, :N_PCS] - mu, Cinv, Z[:, :N_PCS] - mu))
 d_aou, d_ref = dist(X), dist(Rg)
 d99 = np.quantile(d_ref, 0.99)
@@ -125,7 +118,7 @@ with open(f"{OUT}/round1_provenance.txt", "w") as f:
     f.write(f"reference\t1000G {', '.join(EUR_POPS)} founders in training_pca.tsv (n={int(is_eur.sum())})\n"
             f"labels\t{KG_LABELS_URL}\n"
             f"pcs\t1-{N_PCS} of ancestry_preds.tsv pca_features\n"
-            f"distance\tMahalanobis over PCs 1-{N_PCS}, shrunk reference covariance\n"
+            f"distance\tMahalanobis over PCs 1-{N_PCS}, reference covariance\n"
             f"selection\tPC coordinates and 1000G labels only; no AoU label\n"
             f"width\t{WIDTH:g}x the distance holding 99% of the reference founders\n"
             f"threshold\t{WIDTH * d99:.6f}\nkept\t{int(keep.sum())}\n")

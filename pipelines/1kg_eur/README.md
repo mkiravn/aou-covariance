@@ -35,9 +35,10 @@ eur_D2 original to adapt.
 
 - **inputs** `ancestry_preds.tsv` (AoU participants, 16 PCs) and
   `training_pca.tsv` (HGDP + 1000G reference samples in the same space)
-- **gate** standardized Euclidean distance over PCs 1–5 to the centroid of the
-  1000G European founders (CEU, GBR, FIN, TSI, IBS), each PC scaled by their SD;
-  width 1× the distance holding 99% of those founders
+- **gate** Mahalanobis distance over PCs 1–5 under a multivariate normal fitted
+  to the 1000G European founders (CEU, GBR, FIN, TSI, IBS): their mean and
+  covariance, so the gate follows the cloud's shape; width 1× the distance
+  holding 99% of those founders
 - same gate as the ancestry survey's EUR group, written here for the pipeline
 - **outputs** `1kg_eur_round1_keep_ids.txt` (one `person_id` per line),
   `round1_provenance.txt`, plots
@@ -46,7 +47,7 @@ eur_D2 original to adapt.
 
 ## Step 2 — round 2
 
-- **gate** distance to the projected CEU + GBR centroid: location from the
-  reference, scale from the participants, size tuned to the target
+- **gate** Mahalanobis distance under a multivariate normal fitted to the
+  projected CEU + GBR samples, radius tuned to the target size
 - two comparison gates: the participants' own centroid (as eur_D2 did) and the
   Kemper direction (PCA fit on the 1000G Europeans, participants projected)

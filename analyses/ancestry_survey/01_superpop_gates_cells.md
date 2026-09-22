@@ -128,27 +128,14 @@ def gate_rows(pops):
 ## Cell 3 — gates
 
 Mahalanobis distance to each group's centroid under the group's own covariance:
-a multivariate normal model of the reference samples, so the gate follows the
-shape of the cloud rather than a sphere. Saves the participant list of every
-gate at every width.
+a multivariate normal fitted to its founders, so the gate follows the shape of
+the cloud rather than a sphere. Saves the participant list of every gate at
+every width.
 
 - `growth`: rise in count from 1× to the widest gate; near 1 for a cluster, large for a continuum
 - `spread`: dispersion of the selected participants relative to the reference
 
 ```python
-def metric_cov(Rg):
-    """The group's covariance, shrunk toward a sphere. Shrinkage matters: a 5x5
-    covariance from a few dozen founders is otherwise noisy enough to stretch
-    the gate along a direction that is only sampling error."""
-    try:
-        from sklearn.covariance import LedoitWolf
-        return LedoitWolf().fit(Rg).covariance_
-    except ImportError:                       # same target, fixed weight
-        S_ = np.cov(Rg, rowvar=False)
-        lam = 0.1
-        return (1 - lam) * S_ + lam * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
-
-
 def mahalanobis(Z, mu, C):
     d = Z[:, :N_PCS] - mu
     return np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(C), d))
@@ -157,7 +144,8 @@ def mahalanobis(Z, mu, C):
 dist, d99, kept, centre = {}, {}, {}, {}
 for g, pops in GATES.items():
     Rg = R[gate_rows(pops), :N_PCS]
-    mu, C = Rg.mean(0), metric_cov(Rg)
+    assert len(Rg) > 2 * N_PCS, f"{g}: too few founders for a {N_PCS}x{N_PCS} covariance"
+    mu, C = Rg.mean(0), np.cov(Rg, rowvar=False)
     centre[g] = (mu, C)
     dist[g] = mahalanobis(X, mu, C)
     d99[g] = np.quantile(mahalanobis(Rg, mu, C), 0.99)
