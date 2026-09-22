@@ -53,7 +53,8 @@ ANCHOR_POPS = ["CEU", "GBR"]
 
 BANDS = {"common": (0.01, 0.5), "lowfreq": (0.001, 0.01)}   # MAF floor, ceiling
 TARGET_PER_BAND = 200_000
-PRUNE = "500kb 1 0.1"          # kb window: plink2 requires the step to be 1
+PRUNE = "1000kb 1 0.05"        # kb window: plink2 requires the step to be 1
+PRUNE_PASSES = 2               # a second pass catches LD the first window missed
 N_PCS_FIT = 20
 N_PCS_COVARIATE = 20
 SEED = 1
@@ -108,28 +109,54 @@ os.environ["PATH"] = f"{os.path.expanduser('~/bin')}:{os.environ['PATH']}"
 HIGH_LD_REGIONS_GRCH38 = """\
 chr1 47761740 51761740 1
 chr2 85919365 100517106 2
-chr2 182427027 189427029 3
-chr3 47483505 49987563 4
-chr3 83368158 86868160 5
-chr5 44464140 51168409 6
-chr5 129636407 132636409 7
-chr6 25391792 33424245 8
-chr6 57788603 58453888 9
-chr6 61109122 61357029 10
-chr6 139637169 142137170 11
-chr7 54964812 66897578 12
-chr8 8105067 12105082 13
-chr8 43025699 48924888 14
-chr8 110918594 113918595 15
-chr10 36671065 43184546 16
-chr11 88127183 91127184 17
-chr12 32955798 41319931 18
-chr20 33948532 36438183 19
+chr2 89917298 89917322 3
+chr2 87416141 87416186 4
+chr2 87417804 87417863 5
+chr2 87418924 87418981 6
+chr1 144106678 144106709 7
+chr14 87391719 87391996 8
+chr9 40365644 40365693 9
+chr2 182427027 189427029 10
+chr3 47483505 49987563 11
+chr3 83368158 86868160 12
+chr5 44464140 51168409 13
+chr5 129636407 132636409 14
+chr6 25391792 33424245 15
+chr6 26726947 26726981 16
+chr6 57788603 58453888 17
+chr6 61109122 61357029 18
+chr6 61424410 61424451 19
+chr9 64198500 64200392 20
+chr6 139637169 142137170 21
+chr7 54964812 66897578 22
+chr7 62182500 62277073 23
+chr12 34639034 34639084 24
+chr14 94658026 94658080 25
+chr17 43159541 43159574 26
+chr2 135275091 135275210 27
+chr1 181955019 181955047 28
+chr22 30060084 30060162 29
+chr9 88958735 88959017 30
+chr2 207609786 207609808 31
+chr22 42980497 42980522 32
+chr20 4031884 4032441 33
+chr8 8105067 12105082 34
+chr8 43025699 48924888 35
+chr8 47303500 47317337 36
+chr8 110918594 113918595 37
+chr10 36671065 43184546 38
+chr10 41693521 41885273 39
+chr1 125169943 125170022 40
+chr11 88127183 91127184 41
+chr12 32955798 41319931 42
+chr20 33948532 36438183 43
 """
-LD_REGIONS = f"{OUT}/high_ld_regions_grch38.txt"
-open(LD_REGIONS, "w").write(HIGH_LD_REGIONS_GRCH38)
-LD_REGIONS_GS = f"{OUT_GS}/high_ld_regions_grch38.txt"
-print(LD_REGIONS)
+PEAKS = f"{OUT}/ld_peaks.txt"            # written by Cell 7b, empty on the first pass
+LD_REGIONS = f"{OUT}/exclude_regions.txt"
+open(LD_REGIONS, "w").write(HIGH_LD_REGIONS_GRCH38
+                            + (open(PEAKS).read() if os.path.isfile(PEAKS) else ""))
+LD_REGIONS_GS = f"{OUT_GS}/exclude_regions.txt"
+print(f"{sum(1 for _ in open(LD_REGIONS))} regions excluded -> {LD_REGIONS}")
 ```
 
 ## Cell 4 — QC, prune and thin (Batch)
@@ -161,8 +188,16 @@ cmd = f"""
         --exclude bed1 "$LD_REGIONS" --nonfounders \
         --indep-pairwise {PRUNE} \
         --threads "$VCPUS" --memory "$MEM_MB" --out "${{Q}}_${{BAND}}"
+      echo "$BAND pruned, pass 1: $(wc -l < "${{Q}}_${{BAND}}.prune.in")"
+
+      for PASS in $(seq 2 {PRUNE_PASSES}); do
+        "$PLINK_BIN" --pfile "$Q" --extract "${{Q}}_${{BAND}}.prune.in" --nonfounders \
+          --indep-pairwise {PRUNE} \
+          --threads "$VCPUS" --memory "$MEM_MB" --out "${{Q}}_${{BAND}}_p${{PASS}}"
+        mv "${{Q}}_${{BAND}}_p${{PASS}}.prune.in" "${{Q}}_${{BAND}}.prune.in"
+        echo "$BAND pruned, pass $PASS: $(wc -l < "${{Q}}_${{BAND}}.prune.in")"
+      done
       NPRUNED=$(wc -l < "${{Q}}_${{BAND}}.prune.in")
-      echo "$BAND pruned: $NPRUNED"
       THIN=""
       if [ "$NPRUNED" -gt {TARGET_PER_BAND} ]; then THIN="--thin-count {TARGET_PER_BAND}"; fi
 
@@ -348,6 +383,53 @@ fig.suptitle(f"{SAMPLE_SET} covariate PCs — common vs low-frequency")
 plt.tight_layout()
 plt.savefig(f"{OUT}/band_comparison.png", dpi=130, bbox_inches="tight")
 plt.show()
+```
+
+## Cell 7b — LD peaks in the loadings
+
+A PC carried by one region is LD, not structure. This flags variants whose
+squared loading is far above the rest, widens each to a window, and writes them
+to `ld_peaks.txt`. If anything is flagged, rerun Cells 3, 4 and 6: the exclusion
+file is the long-range regions plus these, so the next fit drops them.
+
+```python
+PEAK_Q, FLANK_KB, PEAK_PCS = 0.9995, 250, min(10, N_PCS_FIT)
+
+found = []
+for b in BAND_LIST:
+    L = pd.read_csv(f"{OUT}/pca/{b}.eigenvec.allele", sep=r"\s+")
+    idc = "#ID" if "#ID" in L.columns else "ID"
+    L[["CHROM", "POS"]] = L[idc].str.split(":", n=2, expand=True).iloc[:, :2]
+    L["POS"] = L["POS"].astype(int)
+    hit = np.zeros(len(L), dtype=bool)
+    for p in PC[:PEAK_PCS]:
+        v = L[p].to_numpy() ** 2
+        hit |= v > np.quantile(v, PEAK_Q)
+    if hit.any():
+        h = L.loc[hit, ["CHROM", "POS"]].copy()
+        h["band"] = b
+        found.append(h)
+    print(f"{b}: {int(hit.sum())} loading outliers over PC1-{PEAK_PCS}")
+
+if found:
+    H = pd.concat(found).sort_values(["CHROM", "POS"])
+    regions, k = [], 0
+    for chrom, sub in H.groupby("CHROM", sort=False):
+        lo = hi = None
+        for pos in sub["POS"]:
+            if lo is None or pos > hi + FLANK_KB * 1000:
+                if lo is not None:
+                    k += 1
+                    regions.append(f"{chrom} {max(lo - FLANK_KB * 1000, 1)} {hi + FLANK_KB * 1000} peak{k}")
+                lo = pos
+            hi = pos
+        k += 1
+        regions.append(f"{chrom} {max(lo - FLANK_KB * 1000, 1)} {hi + FLANK_KB * 1000} peak{k}")
+    open(PEAKS, "w").write("\n".join(regions) + "\n")
+    print(f"\n{len(regions)} peak regions -> {PEAKS}; rerun Cells 3, 4 and 6")
+    print("\n".join(regions[:10]))
+else:
+    print("\nno peaks; nothing to exclude")
 ```
 
 ## Cell 9 — are the low-frequency PCs technical?

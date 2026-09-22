@@ -2,11 +2,15 @@
 
 For each reference group of 1000 Genomes or HGDP populations:
 
-1. gate AoU participants around the group's centroid in AoU's ancestry PCs, at several widths, and save the lists
-2. test whether the group is a cluster or a continuum
+1. fit a multivariate normal to its founders in AoU's ancestry PCs
+2. gate AoU participants by Mahalanobis distance, at several coverage levels, and save the lists
 3. plot each gate in PC space
-4. measure overlap between gates
+4. measure overlap between gates, and assign participants where a gate is unambiguous
 5. count related pairs inside each gate, by kinship class
+
+A width is the **fraction of the reference population inside the gate**: 0.8 is
+the ellipsoid holding 80% of that group's own founders. Any number of widths
+can be listed; every cell follows `WIDTHS`.
 
 Population labels come from the projects' own sample files. Kinship comes from
 AoU's `samples_relatedness.tsv` (Hail PC-Relate, pairs above 0.1 only).
@@ -17,8 +21,6 @@ Compute: a small VM (4 vCPU, 16 GB).
 ---
 
 ## Cell 1 — config
-
-Paths, gate populations and widths. Downloads the reference label files once.
 
 ```python
 import os, ast, shutil, subprocess
@@ -46,8 +48,7 @@ LABEL_FILES = {
 }
 
 N_PCS = 5
-WIDTHS = [0.5, 1.0, 2.0]                     # multiples of the distance holding 99% of the reference
-W_NARROW, W_WIDE = min(WIDTHS), max(WIDTHS)
+WIDTHS = [0.8, 0.9, 0.99]                    # fraction of the reference population inside the gate
 KIN_CUTS = (0.177, 0.354)                    # KING first-degree bounds, kinship scale
 
 GATES = {
@@ -61,6 +62,7 @@ GATES = {
 }
 GCOL = dict(zip(GATES, ["tab:blue", "tab:orange", "tab:green", "tab:purple",
                         "tab:brown", "tab:olive", "tab:red"]))
+pct = lambda w: f"{w * 100:g}%"
 
 os.makedirs(LABEL_DIR, exist_ok=True)
 for url in LABEL_FILES.values():
@@ -76,8 +78,8 @@ print(OUT)
 
 ## Cell 2 — load
 
-AoU and reference PCs, with the original population labels. Stops if a gate
-population is missing. Only founders define the gates.
+AoU and reference PCs, with the original population labels. Only founders
+define the gates.
 
 ```python
 def parse_pcs(col, n=16):
@@ -127,13 +129,8 @@ def gate_rows(pops):
 
 ## Cell 3 — gates
 
-Mahalanobis distance to each group's centroid under the group's own covariance:
-a multivariate normal fitted to its founders, so the gate follows the shape of
-the cloud rather than a sphere. Saves the participant list of every gate at
-every width.
-
-- `growth`: rise in count from 1× to the widest gate; near 1 for a cluster, large for a continuum
-- `spread`: dispersion of the selected participants relative to the reference
+An MVN per group; each width's radius is the quantile of the founders' own
+distances, so the gate contains that fraction of them by construction.
 
 ```python
 def mahalanobis(Z, mu, C):
@@ -141,72 +138,75 @@ def mahalanobis(Z, mu, C):
     return np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(C), d))
 
 
-dist, d99, kept, centre = {}, {}, {}, {}
+dist, radius, kept, centre = {}, {}, {}, {}
 for g, pops in GATES.items():
     Rg = R[gate_rows(pops), :N_PCS]
     assert len(Rg) > 2 * N_PCS, f"{g}: too few founders for a {N_PCS}x{N_PCS} covariance"
     mu, C = Rg.mean(0), np.cov(Rg, rowvar=False)
     centre[g] = (mu, C)
     dist[g] = mahalanobis(X, mu, C)
-    d99[g] = np.quantile(mahalanobis(Rg, mu, C), 0.99)
+    ref_d = mahalanobis(Rg, mu, C)
     for w in WIDTHS:
-        kept[(g, w)] = dist[g] <= w * d99[g]
+        radius[(g, w)] = float(np.quantile(ref_d, w))
+        kept[(g, w)] = dist[g] <= radius[(g, w)]
         aou.loc[kept[(g, w)], "person_id"].to_csv(
-            f"{KEEP_DIR}/{g}_{w:g}x_keep_ids.txt", index=False, header=False)
+            f"{KEEP_DIR}/{g}_{w * 100:g}pct_keep_ids.txt", index=False, header=False)
 
 rows = []
 for g, pops in GATES.items():
     Rg = R[gate_rows(pops), :N_PCS]
     mu, C = centre[g]
-    k1 = kept[(g, 1.0)]
-    spread = (X[k1, :N_PCS].std(0, ddof=1) / np.sqrt(np.diag(C))).max() if k1.sum() > 1 else np.nan
-    ref_d = mahalanobis(Rg, mu, C)
+    k = kept[(g, WIDTHS[0])]
     rows.append({"gate": g, "ref_n": len(Rg),
-                 "ref_in_narrow": (ref_d <= W_NARROW * d99[g]).mean(),
-                 **{f"n_{w:g}x": int(kept[(g, w)].sum()) for w in WIDTHS},
-                 "growth": kept[(g, W_WIDE)].sum() / max(k1.sum(), 1), "spread": spread})
+                 **{f"n_{w * 100:g}pct": int(kept[(g, w)].sum()) for w in WIDTHS},
+                 "growth": kept[(g, WIDTHS[-1])].sum() / max(kept[(g, WIDTHS[0])].sum(), 1),
+                 "spread": (X[k, :N_PCS].std(0, ddof=1) / np.sqrt(np.diag(C))).max()
+                 if k.sum() > 1 else np.nan})
 T = pd.DataFrame(rows)
 print(T.assign(**{c: T[c].map(show) for c in T if c.startswith("n_")}).round(2).to_string(index=False))
 print(f"\nkeep lists -> {KEEP_DIR}")
 
-mult = np.linspace(0.25, 3, 60)
+cover = np.linspace(0.05, 0.999, 60)
 fig, ax = plt.subplots(figsize=(8, 5))
 for g in GATES:
-    ds = np.sort(dist[g] / d99[g])
-    ax.plot(mult, np.maximum(np.searchsorted(ds, mult, side="right"), 1), color=GCOL[g], label=g)
-ax.axvline(1, color="grey", ls=":", lw=1)
+    mu, C = centre[g]
+    radii = np.quantile(mahalanobis(R[gate_rows(GATES[g]), :N_PCS], mu, C), cover)
+    ax.plot(cover * 100, [np.sum(dist[g] <= r) for r in radii], color=GCOL[g], label=g)
+for w in WIDTHS:
+    ax.axvline(w * 100, color="0.85", lw=0.8, zorder=0)
 ax.set_yscale("log")
-ax.set_xlabel("gate width (× distance holding 99% of the reference)")
+ax.set_xlabel("reference population inside the gate (%)")
 ax.set_ylabel("AoU participants inside")
 ax.legend()
 plt.tight_layout()
-plt.savefig(f"{OUT}/kept_vs_width.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/kept_vs_reference_coverage.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 4 — all gates in PC space
+`growth` is the widest gate's count over the narrowest: near 1 for a cluster,
+large for a continuum. `spread` compares the selected participants' dispersion
+with the reference's, at the narrowest width.
 
-Gates at `W_PLOT` as dots, their boundaries as ellipses, reference founders as
-crosses.
+## Cell 4 — all gates in PC space
 
 ```python
 from matplotlib.patches import Ellipse
 from matplotlib.lines import Line2D
 
-W_PLOT = 1.0
+W_PLOT = WIDTHS[0]
+LS = ["-", "--", ":", "-."]
 rng = np.random.default_rng(0)
 
 
-def gate_ellipse(ax, g, i, j, width, **kw):
-    """Outline of the gate on PCs i, j: the shadow of the ellipsoid, which is set
-    by the 2x2 marginal covariance, so a full metric tilts it."""
+def gate_ellipse(ax, g, i, j, w, **kw):
+    """The ellipsoid's shadow on PCs i, j: the 2x2 marginal covariance, so it
+    tilts with the group."""
     mu, C = centre[g]
-    r = width * d99[g]
     M = C[np.ix_([i, j], [i, j])]
     vals, vecs = np.linalg.eigh(M)
-    angle = np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1]))
+    r = radius[(g, w)]
     ax.add_patch(Ellipse((mu[i], mu[j]), 2 * r * np.sqrt(vals[-1]), 2 * r * np.sqrt(vals[0]),
-                         angle=angle, fill=False, **kw))
+                         angle=np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1])), fill=False, **kw))
 
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 7))
@@ -224,70 +224,75 @@ for ax, (i, j) in zip(axes, [(0, 1), (2, 3)]):
 axes[0].legend(handles=[Line2D([], [], lw=0, marker="o", ms=6, color=GCOL[g], label=g) for g in GATES]
                        + [Line2D([], [], lw=0, marker="x", ms=6, color="0.4", label="reference founders")],
                fontsize=8)
-fig.suptitle(f"AoU (grey), reference founders (crosses), participants inside each gate at "
-             f"{W_PLOT:g}× (dots) and its boundary (ellipse)")
+fig.suptitle(f"AoU (grey), reference founders (crosses), participants inside each gate at {pct(W_PLOT)} "
+             "(dots) and its boundary (ellipse)")
 plt.tight_layout()
-plt.savefig(f"{OUT}/gates_pcs_{W_PLOT:g}x.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/gates_pcs_{W_PLOT * 100:g}pct.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
 ## Cell 4b — each gate
 
-Dark dots: narrow gate. Light dots: added by the widest gate. Ellipses: narrow
-(solid), 1× (dotted), widest (dashed).
+One figure per gate, with every width drawn. Dots are shaded by the narrowest
+gate that contains them.
 
 ```python
 from matplotlib.colors import to_rgb
-from matplotlib.lines import Line2D
 
 ZOOM = True              # False: full PC range
 PC_PAIRS = [(0, 1), (2, 3)]
 
+
+def shade(base, k, n):
+    """Full colour for the narrowest gate, lighter for each wider one."""
+    t = 0.25 + 0.75 * (1 - k / max(n - 1, 1))
+    return tuple(t * np.array(to_rgb(base)) + (1 - t))
+
+
 for g, pops in GATES.items():
-    in_narrow = kept[(g, W_NARROW)]
-    in_wide = kept[(g, W_WIDE)] & ~in_narrow
-    r = gate_rows(pops)
     pop_col = dict(zip(pops, plt.cm.Dark2.colors))
-    light = 0.35 * np.array(to_rgb(GCOL[g])) + 0.65
+    bands, prev = [], np.zeros(len(X), dtype=bool)
+    for k, w in enumerate(WIDTHS):
+        m = kept[(g, w)] & ~prev
+        bands.append((m, shade(GCOL[g], k, len(WIDTHS)), f"{pct(w)} ({show(int(m.sum()))})"))
+        prev = prev | kept[(g, w)]
 
     fig, axes = plt.subplots(1, len(PC_PAIRS), figsize=(15, 6.5))
     for ax, (i, j) in zip(axes, PC_PAIRS):
+        mu, C = centre[g]
         if ZOOM:
-            mu, C = centre[g]
-            half = W_WIDE * d99[g] * np.sqrt(np.diag(C[np.ix_([i, j], [i, j])]))
-            pts = np.r_[X[in_narrow | in_wide][:, [i, j]], R[r][:, [i, j]],
+            half = radius[(g, WIDTHS[-1])] * np.sqrt(np.diag(C[np.ix_([i, j], [i, j])]))
+            pts = np.r_[X[prev][:, [i, j]], R[gate_rows(pops)][:, [i, j]],
                         [mu[[i, j]] - half, mu[[i, j]] + half]]
             lo, hi = pts.min(0), pts.max(0)
             pad = 0.15 * np.maximum(hi - lo, 1e-9)
             lo, hi = lo - pad, hi + pad
         else:
             lo, hi = X[:, [i, j]].min(0), X[:, [i, j]].max(0)
-        window = ((X[:, i] >= lo[0]) & (X[:, i] <= hi[0]) & (X[:, j] >= lo[1]) & (X[:, j] <= hi[1]))
+        window = (X[:, i] >= lo[0]) & (X[:, i] <= hi[0]) & (X[:, j] >= lo[1]) & (X[:, j] <= hi[1])
         if window.any():
             ax.hist2d(X[window, i], X[window, j], bins=200, cmap="Greys", norm=LogNorm(),
                       range=[[lo[0], hi[0]], [lo[1], hi[1]]])
         for p in pops:
             m = gate_rows([p])
             ax.scatter(R[m, i], R[m, j], s=28, marker="x", color=pop_col[p], lw=1.2, zorder=1)
-        for m, col, a in ((in_wide, light, 0.5), (in_narrow, GCOL[g], 0.6)):
+        for m, col, _ in reversed(bands):
             idx = np.flatnonzero(m)
-            idx = rng.choice(idx, size=min(20_000, len(idx)), replace=False)
-            ax.scatter(X[idx, i], X[idx, j], s=3, color=col, alpha=a, lw=0, rasterized=True, zorder=2)
-        gate_ellipse(ax, g, i, j, W_NARROW, edgecolor=GCOL[g], lw=1.6, zorder=5)
-        gate_ellipse(ax, g, i, j, 1.0, edgecolor=GCOL[g], lw=1.0, ls=":", zorder=5)
-        gate_ellipse(ax, g, i, j, W_WIDE, edgecolor=GCOL[g], lw=1.2, ls="--", zorder=5)
+            if len(idx):
+                idx = rng.choice(idx, size=min(20_000, len(idx)), replace=False)
+                ax.scatter(X[idx, i], X[idx, j], s=3, color=col, alpha=0.6, lw=0,
+                           rasterized=True, zorder=2)
+        for k, w in enumerate(WIDTHS):
+            gate_ellipse(ax, g, i, j, w, edgecolor=GCOL[g], lw=1.3, ls=LS[k % len(LS)], zorder=5)
         ax.set_xlim(lo[0], hi[0]); ax.set_ylim(lo[1], hi[1])
         ax.set_xlabel(f"PC{i + 1}"); ax.set_ylabel(f"PC{j + 1}")
 
-    handles = ([Line2D([], [], lw=0, marker="o", ms=6, color=GCOL[g],
-                       label=f"inside {W_NARROW:g}× ({show(int(in_narrow.sum()))})"),
-                Line2D([], [], lw=0, marker="o", ms=6, color=light,
-                       label=f"added up to {W_WIDE:g}× ({show(int(in_wide.sum()))})")]
+    handles = ([Line2D([], [], lw=0, marker="o", ms=6, color=col, label=lab)
+                for _, col, lab in bands]
                + [Line2D([], [], lw=0, marker="x", ms=7, mew=1.5, color=pop_col[p],
                          label=f"{p} ({int(gate_rows([p]).sum())})") for p in pops]
-               + [Line2D([], [], color=GCOL[g], lw=1.6, label=f"gate at {W_NARROW:g}×"),
-                  Line2D([], [], color=GCOL[g], lw=1.0, ls=":", label="gate at 1×"),
-                  Line2D([], [], color=GCOL[g], lw=1.2, ls="--", label=f"gate at {W_WIDE:g}×")])
+               + [Line2D([], [], color=GCOL[g], lw=1.3, ls=LS[k % len(LS)], label=f"gate at {pct(w)}")
+                  for k, w in enumerate(WIDTHS)])
     axes[0].legend(handles=handles, fontsize=8, loc="best", framealpha=0.9)
     fig.suptitle(f"{g} gate", color=GCOL[g])
     plt.tight_layout()
@@ -297,131 +302,191 @@ for g, pops in GATES.items():
 
 ## Cell 4c — selection vs reference
 
-Offset of each reference population, and of the selected participants, from
-the gate centroid, in reference SDs. `inside` checks the ellipses (should be 1).
+Offsets from the gate centroid in reference SDs. `inside` should be 1.
 
 ```python
-W_REPORT = 1.0
+W_REPORT = WIDTHS[0]
 PCS = [f"PC{k + 1}" for k in range(N_PCS)]
 for g, pops in GATES.items():
     mu, C = centre[g]
     sd = np.sqrt(np.diag(C))
     m = kept[(g, W_REPORT)]
-    rows = {f"{p} (founders)": (R[gate_rows([p]), :N_PCS].mean(0) - mu) / sd for p in pops}
+    rows_ = {f"{p} (founders)": (R[gate_rows([p]), :N_PCS].mean(0) - mu) / sd for p in pops}
     if m.sum() > 20:
-        rows[f"AoU inside {W_REPORT:g}×"] = (X[m, :N_PCS].mean(0) - mu) / sd
+        rows_[f"AoU inside {pct(W_REPORT)}"] = (X[m, :N_PCS].mean(0) - mu) / sd
     inside = {}
     if m.any():
         for i, j in PC_PAIRS:
             y = X[m][:, [i, j]] - mu[[i, j]]
-            Minv = np.linalg.inv(C[np.ix_([i, j], [i, j])])
-            d2 = np.einsum("ij,jk,ik->i", y, Minv, y)
-            inside[f"PC{i + 1}/PC{j + 1}"] = round(float((d2 <= (W_REPORT * d99[g]) ** 2).mean()), 3)
-    print(f"\n{g}  n inside {W_REPORT:g}× = {show(int(m.sum()))}   inside: {inside}")
-    print(pd.DataFrame(rows, index=PCS).T.round(2).to_string())
+            d2 = np.einsum("ij,jk,ik->i", y, np.linalg.inv(C[np.ix_([i, j], [i, j])]), y)
+            inside[f"PC{i + 1}/PC{j + 1}"] = round(float((d2 <= radius[(g, W_REPORT)] ** 2).mean()), 3)
+    print(f"\n{g}  n inside {pct(W_REPORT)} = {show(int(m.sum()))}   inside: {inside}")
+    print(pd.DataFrame(rows_, index=PCS).T.round(2).to_string())
 ```
 
-## Cell 4e — why the drawn ellipse is not the gate
+## Cell 4d — why the ellipse is not the gate
 
-The gate uses PCs 1–5; the ellipse is its outline on two of them. Participants
-inside the ellipse are coloured by what the remaining PCs add to their distance,
-given these two, in units of the gate limit. Above 1 they are excluded whatever
-this panel shows.
+The gate uses PCs 1–5; the ellipse is its outline on two of them. Colour is
+what the remaining PCs add, given these two: above 1 the participant is out.
 
 ```python
-G = "NAT"                 # gate to inspect
-I, J = 0, 1               # PCs on the axes
-W_SHOW = W_WIDE
+G = "NAT"
+I, J = 0, 1
+W_SHOW = WIDTHS[-1]
 
-# Under the MVN, the squared distance splits exactly into what these two PCs
-# show (the marginal term, which is what the drawn ellipse bounds) and what the
-# other PCs add given them (the conditional term).
 mu, C = centre[G]
 d = X[:, :N_PCS] - mu
 M = C[np.ix_([I, J], [I, J])]
 d_plane = np.sqrt(np.einsum("ij,jk,ik->i", d[:, [I, J]], np.linalg.inv(M), d[:, [I, J]]))
 d_other = np.sqrt(np.maximum(dist[G] ** 2 - d_plane ** 2, 0))
-lim = W_SHOW * d99[G]
-inside_ellipse = d_plane <= lim
-passes = inside_ellipse & (dist[G] <= lim)
+lim = radius[(G, W_SHOW)]
+in_ellipse = d_plane <= lim
+passes = in_ellipse & (dist[G] <= lim)
 
-print(f"{G}: inside the {W_SHOW:g}× ellipse on PC{I + 1}/PC{J + 1}: {show(int(inside_ellipse.sum()))}; "
+print(f"{G}: inside the {pct(W_SHOW)} ellipse on PC{I + 1}/PC{J + 1}: {show(int(in_ellipse.sum()))}; "
       f"of those, in the gate: {show(int(passes.sum()))}")
-excluded = inside_ellipse & ~passes
+excluded = in_ellipse & ~passes
 if excluded.sum() > 20:
-    sd = np.sqrt(np.diag(C))
     print("mean |PC - centroid| in reference SDs among those excluded:",
-          dict(zip([f"PC{k + 1}" for k in range(N_PCS)],
-                   np.abs(d[excluded] / sd).mean(0).round(2))))
+          dict(zip(PCS, np.abs(d[excluded] / np.sqrt(np.diag(C))).mean(0).round(2))))
 
 fig, ax = plt.subplots(figsize=(8.5, 7.5))
 ax.hist2d(X[:, I], X[:, J], bins=300, cmap="Greys", norm=LogNorm(), zorder=0)
-sc = ax.scatter(X[inside_ellipse, I], X[inside_ellipse, J], c=d_other[inside_ellipse] / lim,
+sc = ax.scatter(X[in_ellipse, I], X[in_ellipse, J], c=d_other[in_ellipse] / lim,
                 s=3, cmap="RdYlBu_r", vmin=0, vmax=2, lw=0, rasterized=True, zorder=2)
-for w, ls in ((W_NARROW, "-"), (1.0, ":"), (W_SHOW, "--")):
-    gate_ellipse(ax, G, I, J, w, edgecolor=GCOL[G], lw=1.3, ls=ls, zorder=3)
-pts = X[inside_ellipse][:, [I, J]]
+for k, w in enumerate(WIDTHS):
+    gate_ellipse(ax, G, I, J, w, edgecolor=GCOL[G], lw=1.3, ls=LS[k % len(LS)], zorder=3)
+pts = X[in_ellipse][:, [I, J]]
 pad = 0.1 * np.ptp(pts, axis=0)
 ax.set_xlim(pts[:, 0].min() - pad[0], pts[:, 0].max() + pad[0])
 ax.set_ylim(pts[:, 1].min() - pad[1], pts[:, 1].max() + pad[1])
 ax.set_xlabel(f"PC{I + 1}"); ax.set_ylabel(f"PC{J + 1}")
-fig.colorbar(sc, ax=ax, label="what the other PCs add, given these two (× gate limit); >1 excluded")
-ax.set_title(f"{G}: participants inside the {W_SHOW:g}× ellipse on these two PCs")
+fig.colorbar(sc, ax=ax, label="what the other PCs add, given these two (× gate radius); >1 excluded")
+ax.set_title(f"{G}: participants inside the {pct(W_SHOW)} ellipse on these two PCs")
 plt.tight_layout()
 plt.savefig(f"{OUT}/gate_{G}_other_pcs.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 4d — overlap between gates
+## Cell 5 — assignment at one width
 
-Share of each row gate's participants also inside each column gate.
+A participant is assigned only when exactly one gate contains them.
 
 ```python
-W_OVERLAP = 1.0
-names = list(GATES)
-sets = {g: kept[(g, W_OVERLAP)] for g in names}
-C = np.array([[int((sets[a] & sets[b]).sum()) for b in names] for a in names])
-n = np.diag(C)
-share = np.divide(C, n[:, None], out=np.full(C.shape, np.nan), where=n[:, None] > 0)
-small = (C > 0) & (C <= 20)
+W = WIDTHS[0]
+LABELS = list(GATES) + ["multiple", "unassigned"]
 
-counts = pd.DataFrame(C, index=names, columns=names)
-counts.to_csv(f"{OUT}/gate_overlap_counts_{W_OVERLAP:g}x.tsv", sep="\t")
-print(f"participants in both gates at {W_OVERLAP:g}× (row ∩ column)")
-print(counts.apply(lambda c: c.map(show)).to_string())
+masks = np.column_stack([kept[(g, W)] for g in GATES])
+n_in = masks.sum(1)
+assigned = np.where(n_in > 1, "multiple", "unassigned").astype(object)
+for k, g in enumerate(GATES):
+    assigned[masks[:, k] & (n_in == 1)] = g
+counts = pd.Series(assigned).value_counts().reindex(LABELS, fill_value=0)
 
-fig, ax = plt.subplots(figsize=(7.5, 6.5))
-im = ax.imshow(np.where(small, np.nan, share), vmin=0, vmax=1, cmap="Blues")
-for a in range(len(names)):
-    for b in range(len(names)):
-        if a == b:
-            txt = f"n={show(int(n[a]))}"
-        elif small[a, b]:
-            txt = "≤20"
-        elif np.isfinite(share[a, b]):
-            txt = f"{share[a, b]:.2f}"
-        else:
-            txt = ""
-        ax.text(b, a, txt, ha="center", va="center", fontsize=8,
-                color="white" if np.isfinite(share[a, b]) and share[a, b] > 0.6 else "black")
-ax.set_xticks(range(len(names)))
-ax.set_xticklabels(names)
-ax.set_yticks(range(len(names)))
-ax.set_yticklabels(names)
-for lab in ax.get_xticklabels() + ax.get_yticklabels():
-    lab.set_color(GCOL[lab.get_text()])
-ax.set_xlabel("also inside gate …")
-ax.set_ylabel("participants of gate …")
-fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="share of row gate")
-ax.set_title(f"overlap between gates at {W_OVERLAP:g}×")
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.barh(range(len(counts)), np.maximum(counts.values, 1),
+        color=[GCOL.get(l, "0.6") for l in counts.index])
+ax.set_yticks(range(len(counts)))
+ax.set_yticklabels(counts.index)
+ax.invert_yaxis()
+ax.set_xscale("log")
+ax.set_xlabel("AoU participants")
+for i, n in enumerate(counts.values):
+    ax.text(max(n, 1) * 1.15, i, f"{show(int(n))}  ({n / len(assigned) * 100:.1f}%)",
+            va="center", fontsize=8, color="0.3")
+ax.set_title(f"assignment at {pct(W)}: a gate is claimed only when no other gate also contains them")
 plt.tight_layout()
-plt.savefig(f"{OUT}/gate_overlap_{W_OVERLAP:g}x.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/assignment_{W * 100:g}pct.png", dpi=130, bbox_inches="tight")
+plt.show()
+
+print(pd.DataFrame({"assignment": counts.index, "n": counts.map(show).values,
+                    "pct": (counts.values / len(assigned) * 100).round(2)}).to_string(index=False))
+```
+
+## Cell 5b — assignment across widths
+
+How the composition moves as the gates widen: more people covered, more of them
+claimed by two gates at once.
+
+```python
+comp, per_gate = [], []
+for w in WIDTHS:
+    masks = np.column_stack([kept[(g, w)] for g in GATES])
+    n_in = masks.sum(1)
+    a = np.where(n_in > 1, "multiple", "unassigned").astype(object)
+    for k, g in enumerate(GATES):
+        a[masks[:, k] & (n_in == 1)] = g
+    comp.append({"width": pct(w), "assigned": int((n_in == 1).sum()),
+                 "multiple": int((n_in > 1).sum()), "unassigned": int((n_in == 0).sum())})
+    per_gate.append(pd.Series(a).value_counts().reindex(list(GATES), fill_value=0).rename(pct(w)))
+
+A = pd.DataFrame(comp).set_index("width")
+G_ = pd.concat(per_gate, axis=1)
+A.to_csv(f"{OUT}/assignment_by_width.tsv", sep="\t")
+G_.to_csv(f"{OUT}/assignment_by_width_per_gate.tsv", sep="\t")
+print(A.apply(lambda c: c.map(show)).to_string())
+print("\nuniquely assigned to each gate")
+print(G_.apply(lambda c: c.map(show)).to_string())
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 4.5))
+bottom = np.zeros(len(A))
+for col, c in (("assigned", "#2a78d6"), ("multiple", "#eb6834"), ("unassigned", "0.8")):
+    axes[0].bar(A.index, A[col], bottom=bottom, color=c, label=col)
+    bottom += A[col].to_numpy()
+axes[0].set_ylabel("AoU participants")
+axes[0].set_xlabel("reference population inside the gate")
+axes[0].legend(fontsize=8)
+axes[0].set_title("composition")
+
+for g in GATES:
+    axes[1].plot(G_.columns, np.maximum(G_.loc[g], 1), marker="o", ms=4, color=GCOL[g], label=g)
+axes[1].set_yscale("log")
+axes[1].set_ylabel("uniquely assigned")
+axes[1].set_xlabel("reference population inside the gate")
+axes[1].legend(fontsize=8, ncol=2)
+axes[1].set_title("per gate")
+plt.tight_layout()
+plt.savefig(f"{OUT}/assignment_by_width.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 5 — load kinship
+## Cell 5c — overlap between gates, at every width
 
-AoU's kinship table and the participant set of every gate.
+Row gate A, column gate B: the share of A's participants also inside B.
+
+```python
+names = list(GATES)
+fig, axes = plt.subplots(1, len(WIDTHS), figsize=(5.2 * len(WIDTHS), 5), squeeze=False)
+for ax, w in zip(axes[0], WIDTHS):
+    sets = {g: kept[(g, w)] for g in names}
+    Cn = np.array([[int((sets[a] & sets[b]).sum()) for b in names] for a in names])
+    n = np.diag(Cn)
+    share = np.divide(Cn, n[:, None], out=np.full(Cn.shape, np.nan), where=n[:, None] > 0)
+    small = (Cn > 0) & (Cn <= 20)
+    pd.DataFrame(Cn, index=names, columns=names).to_csv(
+        f"{OUT}/gate_overlap_counts_{w * 100:g}pct.tsv", sep="\t")
+
+    im = ax.imshow(np.where(small, np.nan, share), vmin=0, vmax=1, cmap="Blues")
+    for a in range(len(names)):
+        for b in range(len(names)):
+            txt = (f"n={show(int(n[a]))}" if a == b else
+                   "≤20" if small[a, b] else
+                   f"{share[a, b]:.2f}" if np.isfinite(share[a, b]) else "")
+            ax.text(b, a, txt, ha="center", va="center", fontsize=7,
+                    color="white" if np.isfinite(share[a, b]) and share[a, b] > 0.6 else "black")
+    ax.set_xticks(range(len(names))); ax.set_xticklabels(names, fontsize=8)
+    ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=8)
+    for lab in ax.get_xticklabels() + ax.get_yticklabels():
+        lab.set_color(GCOL[lab.get_text()])
+    ax.set_title(f"{pct(w)} of the reference inside")
+axes[0][0].set_ylabel("participants of gate …")
+fig.suptitle("overlap between gates: share of the row gate also inside the column gate")
+plt.tight_layout()
+plt.savefig(f"{OUT}/gate_overlap.png", dpi=130, bbox_inches="tight")
+plt.show()
+```
+
+## Cell 6 — load kinship
 
 ```python
 if not os.path.isfile(REL_PATH):
@@ -440,47 +505,65 @@ else:
     kin = rel[k_col].to_numpy()
     print(f"{show(len(rel))} pairs, kinship {kin.min():.3f} to {kin.max():.3f}")
 
-    members = {(g, f"{w:g}×"): set(aou.loc[kept[(g, w)], "person_id"])
-               for g in GATES for w in WIDTHS}
+    members = {(g, w): set(aou.loc[kept[(g, w)], "person_id"]) for g in GATES for w in WIDTHS}
 ```
 
-## Cell 5b — related pairs by kinship class
+## Cell 7 — related pairs by kinship class
 
-Pairs inside each gate: second degree, first degree, duplicates or MZ twins.
+Second degree, first degree, duplicates or MZ twins.
+
+A big gate holds many pairs simply by being big: both members have to be inside,
+so counts grow with the square of the gate's share of the cohort. `expected_1st`
+is that null — the first-degree pairs a gate this size would hold if relatives
+were spread evenly across the cohort — and `ratio` is observed over expected. A
+gate that is merely large sits near 1; a gate enriched for relatives sits above.
 
 ```python
 KIN_CLASSES = ["< 0.177", "0.177–0.354", "≥ 0.354"]
 kin_class = np.select([kin < KIN_CUTS[0], kin < KIN_CUTS[1]], KIN_CLASSES[:2], KIN_CLASSES[2])
+n_first = int((kin_class == KIN_CLASSES[1]).sum())
 
-rows = []
+rows_ = []
 for (g, w), ids in members.items():
     both = (rel[i_col].isin(ids) & rel[j_col].isin(ids)).to_numpy()
     by_class = pd.Series(kin_class[both]).value_counts().reindex(KIN_CLASSES, fill_value=0)
-    rows.append({"group": g, "width": w, "participants": len(ids), **by_class.to_dict()})
-K = pd.DataFrame(rows).set_index(["group", "width"])
+    share = len(ids) / len(aou)
+    expected = n_first * share ** 2
+    rows_.append({"gate": g, "width": pct(w), "participants": len(ids),
+                  **by_class.to_dict(), "share_of_cohort": share,
+                  "expected_1st": expected,
+                  "ratio": by_class[KIN_CLASSES[1]] / expected if expected > 0 else np.nan})
+K = pd.DataFrame(rows_).set_index(["gate", "width"])
 K.to_csv(f"{OUT}/kinship_classes.tsv", sep="\t")
 
-display(K.apply(lambda c: c.map(show)).set_axis(
-    pd.MultiIndex.from_tuples([("", "participants")] + [("pairs by kinship", c) for c in KIN_CLASSES]),
-    axis=1))
+out = K.copy()
+for c in KIN_CLASSES + ["participants"]:
+    out[c] = out[c].map(show)
+out["expected_1st"] = out["expected_1st"].round(0).astype(int).map(show)
+out["share_of_cohort"] = (out["share_of_cohort"] * 100).round(1)
+out["ratio"] = out["ratio"].round(2)
+display(out)
 ```
 
-## Cell 5c — related pairs, plotted
+**Check the ID spaces match** before reading anything into these counts: the
+relatedness table's IDs must be the same `person_id` the PCs use. If they were
+not, every count would be zero rather than wrong, so a table of zeros means a
+join problem, not an absence of relatives.
+
+## Cell 8 — related pairs, plotted
 
 ```python
 KIN_TITLES = {"< 0.177": "kinship 0.1–0.177\n(2nd degree)",
               "0.177–0.354": "kinship 0.177–0.354\n(1st degree)",
               "≥ 0.354": "kinship ≥ 0.354\n(duplicates, MZ twins)"}
-groups = list(GATES)
-widths = [f"{w:g}×" for w in WIDTHS]
-alphas = dict(zip(widths, np.linspace(1.0, 0.35, len(widths))))
-bw = 0.8 / len(widths)
+alphas = dict(zip(WIDTHS, np.linspace(1.0, 0.35, len(WIDTHS))))
+bw = 0.8 / len(WIDTHS)
 
 fig, axes = plt.subplots(1, len(KIN_CLASSES), figsize=(17, 5), sharey=True)
 for ax, c in zip(axes, KIN_CLASSES):
-    for x, g in enumerate(groups):
-        for k, w in enumerate(widths):
-            v = int(K.loc[(g, w), c])
+    for x, g in enumerate(GATES):
+        for k, w in enumerate(WIDTHS):
+            v = int(K.loc[(g, pct(w)), c])
             xpos = x - 0.4 + bw * (k + 0.5)
             if v > 20:
                 ax.bar(xpos, v, width=bw, color=GCOL[g], alpha=alphas[w], edgecolor="0.25", lw=0.4)
@@ -488,28 +571,28 @@ for ax, c in zip(axes, KIN_CLASSES):
                 ax.text(xpos, 22, "≤20", rotation=90, ha="center", va="bottom", fontsize=7, color="0.35")
     ax.set_yscale("log")
     ax.set_ylim(bottom=20)
-    ax.set_xticks(range(len(groups)))
-    ax.set_xticklabels(groups)
+    ax.set_xticks(range(len(GATES)))
+    ax.set_xticklabels(list(GATES))
     for lab in ax.get_xticklabels():
         lab.set_color(GCOL[lab.get_text()])
     ax.set_title(KIN_TITLES[c], fontsize=10)
     ax.grid(axis="y", color="0.9", lw=0.6)
     ax.set_axisbelow(True)
 axes[0].set_ylabel("pairs with both members in the gate")
-fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color="0.3", alpha=alphas[w], label=f"gate at {w}")
-                    for w in widths],
-           loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=len(widths), frameon=False, fontsize=9)
+fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color="0.3", alpha=alphas[w], label=pct(w))
+                    for w in WIDTHS],
+           loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=len(WIDTHS), frameon=False, fontsize=9)
 plt.tight_layout()
 plt.savefig(f"{OUT}/kinship_classes.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 5d — kinship histograms
+## Cell 9 — kinship histograms
 
-All pairs, and pairs inside each gate. Dotted lines mark degree cutoffs.
+All pairs, and pairs inside each gate at `W_REL`.
 
 ```python
-W_REL = 1.0
+W_REL = WIDTHS[0]
 CUTS = {"2nd": KIN_CUTS[0] / 2, "1st": KIN_CUTS[0], "dup/MZ": KIN_CUTS[1]}
 edges = np.linspace(kin.min(), kin.max(), 90)
 
@@ -525,12 +608,12 @@ axes[0].stairs(counts_shown(kin), edges, fill=True, color="0.6")
 axes[0].set_title(f"all pairs in the table ({show(len(kin))})")
 
 for g in GATES:
-    ids = members[(g, f"{W_REL:g}×")]
+    ids = members[(g, W_REL)]
     both = (rel[i_col].isin(ids) & rel[j_col].isin(ids)).to_numpy()
     if both.sum() > 20:
         axes[1].stairs(counts_shown(kin[both]), edges, color=GCOL[g], lw=1.4,
                        label=f"{g} ({show(int(both.sum()))})")
-axes[1].set_title(f"pairs with both members inside the gate at {W_REL:g}×")
+axes[1].set_title(f"pairs with both members inside the gate at {pct(W_REL)}")
 axes[1].legend(fontsize=8)
 
 for ax in axes:
@@ -547,27 +630,27 @@ plt.savefig(f"{OUT}/kinship_histograms.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 6 — summary
+## Cell 10 — summary
 
 Tables hold raw counts and stay in the workbench.
 
 ```python
 T.to_csv(f"{OUT}/gate_summary.tsv", sep="\t", index=False)
+pd.DataFrame([{"gate": g, "width": pct(w), "radius": radius[(g, w)]}
+              for g in GATES for w in WIDTHS]).to_csv(f"{OUT}/gate_radii.tsv", sep="\t", index=False)
 print(sorted(os.listdir(OUT)))
 ```
 
-## Cell 7 — copy this notebook to the bucket
+## Cell 11 — copy this notebook to the bucket
 
-Save the notebook first, then run this. Set `NOTEBOOK` to its path.
+Save the notebook first, then run this.
 
 ```python
 NOTEBOOK = os.path.expanduser("~/notebooks/ancestry_survey.ipynb")
 NB_DIR = f"{OUT}/notebooks"
 os.makedirs(NB_DIR, exist_ok=True)
 assert os.path.isfile(NOTEBOOK), NOTEBOOK
-
 dest = f"{NB_DIR}/{os.path.basename(NOTEBOOK)}"
 shutil.copy(NOTEBOOK, dest)
-ok = os.path.getsize(dest) == os.path.getsize(NOTEBOOK)
-print(f"{'OK  ' if ok else 'SIZE MISMATCH'} {dest}")
+print(f"{'OK  ' if os.path.getsize(dest) == os.path.getsize(NOTEBOOK) else 'SIZE MISMATCH'} {dest}")
 ```
