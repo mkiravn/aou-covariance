@@ -124,9 +124,36 @@ LADDER = ["h2_Unrel", "h2_OneSlope", "h2_Rel", "h2_OneSlopeOffsets", "h2_RelOffs
  .pivot_table(index="phenotype", columns="estimator", values="est")[LADDER].round(3))
 ```
 
-## Cell 3 — plotting helpers
+## Cell 3 — style and plotting helpers
+
+Colour does one job per figure: covariate set is an ordered blue ramp, pair
+class is the first three categorical hues, trait category is spatial grouping
+rather than colour. Hollow markers are estimates within one SE of zero.
 
 ```python
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+
+SURFACE, INK, INK2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
+CLASS_COL = {"other": "#2a78d6", "FS": "#eb6834", "PO": "#1baf7a"}
+CLASS_MARK = {"other": "o", "FS": "s", "PO": "^"}
+RAMP = ["#86b6ef", "#3987e5", "#256abf", "#104281"]          # ordered: light to dark
+CS_COL = dict(zip(COVSETS, RAMP))
+DIVERGING = LinearSegmentedColormap.from_list("bpr", ["#104281", "#f0efec", "#e34948"])
+
+plt.rcParams.update({
+    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
+    "axes.edgecolor": AXIS, "axes.linewidth": 0.8, "axes.labelcolor": INK2,
+    "axes.titlecolor": INK, "axes.titlesize": 10, "axes.labelsize": 9,
+    "axes.spines.top": False, "axes.spines.right": False,
+    "text.color": INK, "font.size": 9,
+    "xtick.color": MUTED, "ytick.color": MUTED,
+    "xtick.labelcolor": INK2, "ytick.labelcolor": INK2,
+    "xtick.labelsize": 8, "ytick.labelsize": 8,
+    "grid.color": GRID, "grid.linewidth": 0.6,
+    "legend.frameon": False, "legend.fontsize": 8,
+    "figure.titlesize": 11,
+})
+
 ref = (E[(E["estimator"] == "h2_Unrel") & (E["transform"] == REF_TF) & (E["covset"] == REF_CS)]
        .set_index("phenotype")["est"])
 ORDER = sorted(E["phenotype"].unique(),
@@ -135,55 +162,62 @@ ORDER = sorted(E["phenotype"].unique(),
 YPOS = {p: len(ORDER) - 1 - i for i, p in enumerate(ORDER)}
 
 
-def dress_y(ax):
+def dress_y(ax, ylabels=True):
+    """Phenotype rows, grouped by trait category with a hairline between groups."""
     ax.set_yticks([YPOS[p] for p in ORDER])
-    ax.set_yticklabels(ORDER, fontsize=8)
-    for lab in ax.get_yticklabels():
-        lab.set_color(CAT_COL[CATEGORY.get(lab.get_text(), "uncategorised")])
+    ax.set_yticklabels(ORDER if ylabels else [""] * len(ORDER))
     ax.set_ylim(-0.7, len(ORDER) - 0.3)
+    ax.tick_params(axis="y", length=0)
     for prev, p in zip(ORDER, ORDER[1:]):
         if CATEGORY.get(p) != CATEGORY.get(prev):
-            ax.axhline(YPOS[p] + 0.5, color="0.85", lw=0.8, zorder=0)
+            ax.axhline(YPOS[p] + 0.5, color=GRID, lw=0.8, zorder=0)
 
 
-def cat_handles():
-    present = [c for c in CAT_ORDER if c in set(E["category"])]
-    return [Line2D([], [], lw=0, marker="s", ms=8, color=CAT_COL[c], label=c) for c in present]
+def label_categories(ax):
+    """Category names in the free right margin, one per group."""
+    for cat in CAT_ORDER:
+        rows = [YPOS[p] for p in ORDER if CATEGORY.get(p) == cat]
+        if rows:
+            ax.text(1.015, (min(rows) + max(rows)) / 2, cat, transform=ax.get_yaxis_transform(),
+                    ha="left", va="center", fontsize=8, color=MUTED, clip_on=False)
+
+
+def cs_handles():
+    return [Line2D([], [], lw=0, marker="o", ms=6, color=CS_COL[c], label=c) for c in COVSETS]
 
 
 def forest(D, title, xlabel, fname):
-    """One row per phenotype, one panel per transform, covariate sets dodged
-    and marker-coded, colour = trait category. Filled where the estimate is
-    more than one jackknife SE from zero, hollow where it is not."""
-    offsets = np.linspace(-0.3, 0.3, len(COVSETS))
-    fig, axes = plt.subplots(1, len(TRANSFORMS), figsize=(15, 0.3 * len(ORDER) + 2),
+    """One row per phenotype, one panel per transform, covariate sets dodged and
+    coloured light to dark. Filled markers are more than one SE from zero."""
+    dodge = np.linspace(-0.28, 0.28, len(COVSETS))
+    fig, axes = plt.subplots(1, len(TRANSFORMS), figsize=(13, 0.26 * len(ORDER) + 2.2),
                              sharey=True, sharex=True)
     axes = np.atleast_1d(axes)
     for ax, tf in zip(axes, TRANSFORMS):
-        for cs, off in zip(COVSETS, offsets):
+        ax.grid(axis="x", zorder=0)
+        ax.set_axisbelow(True)
+        for cs, off in zip(COVSETS, dodge):
             s = D[(D["transform"] == tf) & (D["covset"] == cs)
                   & D["phenotype"].isin(YPOS) & np.isfinite(D["est"])]
             if s.empty:
                 continue
             y = s["phenotype"].map(YPOS) + off
-            cols = np.array(s["category"].map(CAT_COL).tolist())
             se = s["se"].fillna(0)
-            ax.hlines(y, s["est"] - se, s["est"] + se, colors=cols, lw=0.8, alpha=0.5)
+            ax.hlines(y, s["est"] - se, s["est"] + se, colors=CS_COL[cs], lw=1.1, alpha=0.55)
             sig = (s["est"].abs() > se).to_numpy()
-            ax.scatter(s["est"][sig], y[sig], c=cols[sig], marker=CS_MARK[cs], s=24,
-                       edgecolors="0.25", linewidths=0.4, zorder=3)
-            ax.scatter(s["est"][~sig], y[~sig], facecolors="none", marker=CS_MARK[cs], s=24,
-                       edgecolors=cols[~sig], linewidths=0.7, alpha=0.7, zorder=3)
-        ax.axvline(0, color="grey", lw=0.6)
+            ax.scatter(s["est"][sig], y[sig], color=CS_COL[cs], s=18, lw=0, zorder=3)
+            ax.scatter(s["est"][~sig], y[~sig], facecolors=SURFACE, edgecolors=CS_COL[cs],
+                       s=18, lw=0.9, zorder=3)
+        ax.axvline(0, color=AXIS, lw=0.9)
         dress_y(ax)
         ax.set_title(tf)
         ax.set_xlabel(xlabel)
-    cs_h = [Line2D([], [], lw=0, marker=CS_MARK[c], ms=6, color="0.4", label=c) for c in COVSETS]
-    fig.legend(handles=cat_handles() + cs_h, loc="upper center",
-               bbox_to_anchor=(0.5, 0.0), ncol=5, fontsize=8, frameon=False)
-    fig.suptitle(f"{title} — {SAMPLE_SET}")
+    label_categories(axes[-1])
+    fig.legend(handles=cs_handles(), loc="upper center", bbox_to_anchor=(0.5, 0.02),
+               ncol=len(COVSETS), title="covariate set", title_fontsize=8)
+    fig.suptitle(f"{title} — {SAMPLE_SET}", y=1.0)
     plt.tight_layout()
-    plt.savefig(f"{OUT}/plots/{fname}.png", dpi=130, bbox_inches="tight")
+    plt.savefig(f"{OUT}/plots/{fname}.png", dpi=150, bbox_inches="tight")
     plt.show()
 ```
 
@@ -205,26 +239,34 @@ forest(NOPO[NOPO["estimator"] == "diff_RelOffsets-Unrel"],
 
 ## Cell 5 — degree offsets
 
+One panel per trait category, one line per phenotype, distant relatives on the
+left. Each point is that band's intercept: covariance above what the shared
+slope predicts.
+
 ```python
-DEG = list(HE.DEG_BANDS)                 # deg4 .. deg1
+DEG = list(HE.DEG_BANDS)
 O = NOPO[(NOPO["transform"] == REF_TF) & (NOPO["covset"] == REF_CS)
          & NOPO["estimator"].isin([f"RelOffsets.{d}" for d in DEG])].copy()
 O["x"] = O["estimator"].str.split(".").str[1].map(DEG.index)
 cats = [c for c in CAT_ORDER if c in set(O["category"])]
-fig, axes = plt.subplots(1, len(cats), figsize=(3.2 * len(cats), 3.6), sharey=True)
+
+fig, axes = plt.subplots(1, len(cats), figsize=(2.9 * len(cats), 3.4), sharey=True)
 for ax, cat in zip(np.atleast_1d(axes), cats):
+    ax.grid(axis="y", zorder=0)
+    ax.set_axisbelow(True)
     for ph, s in O[O["category"] == cat].groupby("phenotype"):
         s = s.sort_values("x")
-        ax.errorbar(s["x"], s["est"], yerr=s["se"], color=CAT_COL[cat], lw=0.9,
-                    elinewidth=0.5, alpha=0.8, marker="o", ms=3)
-    ax.axhline(0, color="grey", lw=0.6)
+        ax.errorbar(s["x"], s["est"], yerr=s["se"], color=RAMP[2], lw=1.1, alpha=0.55,
+                    elinewidth=0.6, marker="o", ms=3, capsize=0)
+    ax.axhline(0, color=AXIS, lw=0.9)
     ax.set_xticks(range(len(DEG)))
     ax.set_xticklabels(DEG)
-    ax.set_title(cat, color=CAT_COL[cat], fontsize=10)
+    ax.set_xlim(-0.35, len(DEG) - 0.65)
+    ax.set_title(cat)
 np.atleast_1d(axes)[0].set_ylabel("offset (cross-product scale)")
 fig.suptitle(f"degree offsets of $h^2_{{RelOffsets}}$ — {SAMPLE_SET}, {REF_TF}, {REF_CS}, noPO")
 plt.tight_layout()
-plt.savefig(f"{OUT}/plots/reloffsets_by_degree.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/plots/reloffsets_by_degree.png", dpi=150, bbox_inches="tight")
 plt.show()
 ```
 
@@ -233,121 +275,75 @@ with relatedness. Offsets near zero leave the related slope to carry everything.
 
 ## Cell 5b — statistical support for each rung
 
-Two views. Left: z for each contrast, estimate over its jackknife SE, so how
-strongly the data ask for that term. Right: fit of each rung to the binned
-means, as chi-square per bin against the bins' own jackknife SEs, with the
-change in chi-square between nested rungs printed.
+Two questions, two panels. Left: is the *coefficient* resolved — each contrast
+over its jackknife SE. Right: does the *fit* improve — the change in chi-square
+per bin when the term is added, also over a jackknife SE, refitting both rungs
+inside every replicate.
 
-Bins are correlated and hold many pairs, so read chi-square as a descriptive
-measure of misfit, not a test.
+The table adds each rung's absolute misfit and a cross-validated error, where
+every replicate is scored on the pairs it left out. Read the CV column with
+care: each replicate holds out only 2/`NBLOCKS` of the pairs, so it has little
+power to separate rungs.
 
 ```python
-from matplotlib.colors import TwoSlopeNorm
-
 CONTRASTS = ["diff_Rel-Unrel", "diff_RelOffsets-Unrel", "diff_Rel-RelOffsets"]
-RUNGS = ["h2_OneSlope", "h2_Rel", "h2_OneSlopeOffsets", "h2_RelOffsets"]
-NOPO_CLS = [HE.CLS.index(c) for c in HE.NOPO]
 
 Z = (NOPO[(NOPO["transform"] == REF_TF) & (NOPO["covset"] == REF_CS)
           & NOPO["estimator"].isin(CONTRASTS)]
      .pivot_table(index="phenotype", columns="estimator", values="z").reindex(ORDER)[CONTRASTS])
 
-DESIGNS = {
-    "h2_OneSlope":        (lambda a: a[:, None], [(-np.inf, HE.R_HI)]),
-    "h2_Rel":             (lambda a: np.c_[a * (a < HE.U_HI), a * (a >= HE.U_HI)],
-                           [(-np.inf, HE.R_HI)]),
-    "h2_OneSlopeOffsets": (lambda a: np.c_[a, HE_offsets(a)],
-                           [(-np.inf, HE.U_HI), (HE.T_HI, HE.R_HI)]),
-    "h2_RelOffsets":      (lambda a: np.c_[a * (a < HE.U_HI), a * (a >= HE.U_HI), HE_offsets(a)],
-                           [(-np.inf, HE.U_HI), (HE.T_HI, HE.R_HI)]),
-}
-
-
-def HE_offsets(a):
-    return np.column_stack([HE._ind(a, lo, hi) for lo, hi in HE.DEG_BANDS.values()])
-
-
-def chi2_per_bin(tag):
-    """Per-rung chi-square per bin of the noPO bin means, and the fitted df."""
+fit_rows, fit_z = [], {}
+for ph in ORDER:
+    tag = f"{ph}__{REF_TF}__{REF_CS}__{CLASS_TAG}__{BIN_TAG}"
     S, N = HE.load_arrays(f"{MERGED_DIR}/{tag}_merged.full.tsv",
                           f"{MERGED_DIR}/{tag}_merged.jk.tsv", len(MID), NBLOCKS)
-    s, n = S[:, NOPO_CLS].sum(1), N[:, NOPO_CLS].sum(1)          # (1 + NBLOCKS, nbins)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        m = np.where(n > 0, s / n, np.nan)
-    reps = m[1:]
-    se = np.sqrt((NBLOCKS - 1) / NBLOCKS * np.nansum((reps - np.nanmean(reps, 0)) ** 2, 0))
-    out = {}
-    for name, (design, ranges) in DESIGNS.items():
-        inside = np.zeros(len(MID), dtype=bool)
-        for lo, hi in ranges:
-            inside |= (MID >= lo) & (MID < hi)
-        k = inside & (n[0] > 0) & np.isfinite(m[0]) & (se > 0)
-        X, y, w = design(MID[k]), m[0][k], n[0][k]
-        beta = HE._wls(X, y, w)
-        if beta is None:
-            out[name] = (np.nan, np.nan)
-            continue
-        chi2 = float((((y - X @ beta) / se[k]) ** 2).sum())
-        out[name] = (chi2 / max(k.sum() - X.shape[1], 1), k.sum() - X.shape[1])
-    return out
+    f_, c_ = HE.compare_models(S, N, MID, NBLOCKS)
+    fit_rows.append(f_.assign(phenotype=ph))
+    fit_z[ph] = c_.set_index("contrast")["z"]
+FIT = pd.concat(fit_rows, ignore_index=True)
+FITZ = pd.DataFrame(fit_z).T.reindex(ORDER)
+FIT.to_csv(f"{OUT}/model_fit.tsv", sep="\t", index=False)
+FITZ.to_csv(f"{OUT}/model_fit_z.tsv", sep="\t")
 
 
-C = pd.DataFrame({ph: {k: v[0] for k, v in chi2_per_bin(
-    f"{ph}__{REF_TF}__{REF_CS}__{CLASS_TAG}__{BIN_TAG}").items()}
-    for ph in ORDER}).T[RUNGS]
-C.to_csv(f"{OUT}/fit_chi2_per_bin.tsv", sep="\t")
+def zmap(ax, D, title, ylabels):
+    v = np.nanmax(np.abs(D.to_numpy())) or 1
+    im = ax.imshow(D.to_numpy(), aspect="auto", cmap=DIVERGING,
+                   norm=TwoSlopeNorm(vcenter=0, vmin=-v, vmax=v))
+    ax.set_xticks(range(D.shape[1]))
+    ax.set_xticklabels([c.replace("diff_", "") for c in D.columns], rotation=25, ha="right")
+    ax.set_yticks(range(len(D)))
+    ax.set_yticklabels(D.index if ylabels else [""] * len(D))
+    ax.tick_params(length=0)
+    ax.set_title(title)
+    for k in range(1, len(D)):
+        ax.axhline(k - 0.5, color=SURFACE, lw=0.6)
+    return im
 
-fig, axes = plt.subplots(1, 2, figsize=(15, 0.28 * len(ORDER) + 2),
-                         gridspec_kw={"width_ratios": [1, 1.25]})
-im = axes[0].imshow(Z.to_numpy(), aspect="auto", cmap="RdBu_r",
-                    norm=TwoSlopeNorm(vcenter=0, vmin=-np.nanmax(np.abs(Z.to_numpy())),
-                                      vmax=np.nanmax(np.abs(Z.to_numpy()))))
-axes[0].set_xticks(range(len(CONTRASTS)))
-axes[0].set_xticklabels([c.replace("diff_", "") for c in CONTRASTS], rotation=20, ha="right", fontsize=8)
-axes[0].set_yticks(range(len(Z)))
-axes[0].set_yticklabels(Z.index, fontsize=7)
-for lab in axes[0].get_yticklabels():
-    lab.set_color(CAT_COL[CATEGORY.get(lab.get_text(), "uncategorised")])
-axes[0].set_title("z of each contrast", fontsize=10)
-fig.colorbar(im, ax=axes[0], fraction=0.05, pad=0.03, label="z")
 
-bw = 0.8 / len(RUNGS)
-for r, name in enumerate(RUNGS):
-    axes[1].barh(np.arange(len(C)) - 0.4 + bw * (r + 0.5), C[name], height=bw,
-                 color=plt.cm.viridis(r / (len(RUNGS) - 1)), label=name)
-axes[1].axvline(1, color="grey", ls=":", lw=1)
-axes[1].set_yticks(range(len(C)))
-axes[1].set_yticklabels([])
-axes[1].set_ylim(-0.6, len(C) - 0.4)
-axes[1].set_xscale("log")
-axes[1].set_xlabel("chi-square per bin (1 = bins fit within their own noise)")
-axes[1].legend(fontsize=8)
-axes[1].set_title("fit of each rung to the binned means", fontsize=10)
+fig, axes = plt.subplots(1, 2, figsize=(11, 0.26 * len(ORDER) + 2.4))
+zmap(axes[0], Z, "coefficient: estimate / SE", True)
+im = zmap(axes[1], FITZ, "fit: change in chi-square / SE", False)
+fig.colorbar(im, ax=axes, fraction=0.03, pad=0.02, label="z")
 fig.suptitle(f"statistical support — {SAMPLE_SET}, {REF_TF}, {REF_CS}, noPO")
-plt.tight_layout()
-plt.savefig(f"{OUT}/plots/model_support.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/plots/model_support.png", dpi=150, bbox_inches="tight")
 plt.show()
 
-print("change in chi-square per bin between nested rungs (positive = the added term helps)")
-print(pd.DataFrame({"offsets, one slope": C["h2_OneSlope"] - C["h2_OneSlopeOffsets"],
-                    "offsets, two slopes": C["h2_Rel"] - C["h2_RelOffsets"],
-                    "second slope, no offsets": C["h2_OneSlope"] - C["h2_Rel"],
-                    "second slope, with offsets": C["h2_OneSlopeOffsets"] - C["h2_RelOffsets"]})
-      .round(2).to_string())
+print(FIT.pivot(index="phenotype", columns="model", values="chi2_per_bin")
+      .reindex(ORDER).round(2).to_string())
 ```
 
 ## Cell 6 — per-phenotype fits with a coefficient panel
 
-`FIT_TF` only, all covariate sets. Left: binned means (hue = pair class, shade
-= covariate set), the `h2_Unrel` additive line dashed, and the `h2_RelOffsets`
-fit drawn band by band. Right: every estimator for every covariate set.
+`FIT_TF` only, all covariate sets. Colour is the covariate set, marker shape the
+pair class. Fitted lines are drawn for one covariate set so they stay readable.
+Small vertical numbers above the bins are pair counts, from `LABEL_FROM` upward;
+bins below `MIN_N` are not plotted at all.
 
 ```python
-CMAP  = {"other": plt.cm.Blues, "FS": plt.cm.Oranges, "PO": plt.cm.Purples}
-MARK  = {"other": "o", "FS": "s", "PO": "^"}
-SHADE = dict(zip(COVSETS, np.linspace(0.45, 0.95, len(COVSETS))))
-MS, XLIM = 5, (-0.06, 1.12)
-FIT_CS = REF_CS            # fitted lines drawn for this covariate set only
+MS, XLIM = 4.5, (-0.06, 1.12)
+FIT_CS = REF_CS
+LABEL_FROM = HE.U_HI            # -np.inf to label every bin
 H2_ROWS = ["h2_Unrel", "h2_OneSlope", "h2_Rel", "h2_OneSlopeOffsets",
            "h2_RelOffsets", "h2_FS", "h2_PedW25"]
 B2_ROWS = ["b2_FS", "b2_step"]
@@ -360,54 +356,65 @@ def coef(ph, cs, name):
 
 
 def coef_panel(ax, ph, rows):
-    for cs, dy in zip(COVSETS, np.linspace(-0.27, 0.27, len(COVSETS))):
-        col = plt.cm.Greys(SHADE[cs])
+    ax.grid(axis="x", zorder=0)
+    ax.set_axisbelow(True)
+    for cs, dy in zip(COVSETS, np.linspace(-0.26, 0.26, len(COVSETS))):
         for i, name in enumerate(rows):
             est, se = coef(ph, cs, name)
-            if np.isfinite(est):
-                sig = not (np.isfinite(se) and abs(est) <= se)
-                ax.errorbar(est, len(rows) - 1 - i + dy, xerr=se if np.isfinite(se) else None,
-                            fmt="o", ms=4, color=col, ecolor=col, elinewidth=0.8,
-                            mfc=col if sig else "none", mec=col if not sig else "0.3", mew=0.6)
+            if not np.isfinite(est):
+                continue
+            y = len(rows) - 1 - i + dy
+            sig = not (np.isfinite(se) and abs(est) <= se)
+            ax.hlines(y, est - (se or 0), est + (se or 0), colors=CS_COL[cs], lw=1.1, alpha=0.55)
+            ax.scatter(est, y, s=18, zorder=3, lw=0 if sig else 0.9,
+                       color=CS_COL[cs] if sig else SURFACE,
+                       edgecolors=CS_COL[cs])
     ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels(rows[::-1], fontsize=8)
+    ax.set_yticklabels(rows[::-1])
     ax.set_ylim(-0.6, len(rows) - 0.4)
-    ax.axvline(0, color="grey", lw=0.5)
-    ax.tick_params(axis="x", labelsize=8)
+    ax.axvline(0, color=AXIS, lw=0.9)
+    ax.tick_params(axis="y", length=0)
 
 
 for ph in ORDER:
     tables = {}
     for cs in COVSETS:
-        p = f"{MERGED_DIR}/{ph}__{FIT_TF}__{cs}__{CLASS_TAG}__{BIN_TAG}_merged.full.tsv"
-        if os.path.isfile(p):
-            t = pd.read_csv(p, sep="\t")
+        f = f"{MERGED_DIR}/{ph}__{FIT_TF}__{cs}__{CLASS_TAG}__{BIN_TAG}_merged.full.tsv"
+        if os.path.isfile(f):
+            t = pd.read_csv(f, sep="\t")
             tables[cs] = t[(t.full_n >= MIN_N) & (t["class"] != "pooled")]
     if not tables:
         continue
 
-    fig = plt.figure(figsize=(15, 6.5))
-    gs = GridSpec(2, 2, width_ratios=[3, 1.15], height_ratios=[len(H2_ROWS), len(B2_ROWS) + 0.6],
-                  wspace=0.28, hspace=0.35)
+    fig = plt.figure(figsize=(14, 6.2))
+    gs = GridSpec(2, 2, width_ratios=[3, 1.1], height_ratios=[len(H2_ROWS), len(B2_ROWS) + 0.6],
+                  wspace=0.3, hspace=0.45)
     ax, axh, axb = fig.add_subplot(gs[:, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, 1])
+    ax.grid(axis="y", zorder=0)
+    ax.set_axisbelow(True)
 
     for cs, t in tables.items():
         for cls in ("other", "FS", "PO"):
             s = t[t["class"] == cls]
             if len(s):
-                col = CMAP[cls](SHADE[cs])
-                ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt=MARK[cls], ms=MS,
-                            color=col, lw=0, elinewidth=0.6, capsize=0, ecolor=col, alpha=0.85,
-                            mec="0.3", mew=0.4, zorder=2 if cls == "other" else 4)
-    # fits for one covariate set only, so the lines stay readable
-    cs = FIT_CS if FIT_CS in tables else next(iter(tables))
-    g = lambda name: coef(ph, cs, name)[0]
+                ax.errorbar(s.bin_midpoint, s.full_mean, yerr=s.jk_se, fmt=CLASS_MARK[cls],
+                            ms=MS, color=CS_COL[cs], lw=0, elinewidth=0.6, capsize=0,
+                            ecolor=CS_COL[cs], alpha=0.9, mec=SURFACE, mew=0.4,
+                            zorder=2 if cls == "other" else 4)
+
+    # pair counts per bin, over the fitted range, from the covariate set the fits use
+    ref_t = tables.get(FIT_CS, next(iter(tables.values())))
+    lab = ref_t[(ref_t.bin_midpoint >= LABEL_FROM) & (ref_t.bin_midpoint < HE.R_HI)]
+    span = np.ptp(np.r_[[t.full_mean.to_numpy() for t in tables.values()]])
+    for _, row in lab.iterrows():
+        ax.text(row.bin_midpoint, row.full_mean + row.jk_se + 0.015 * span, f"{int(row.full_n):,}",
+                rotation=90, ha="center", va="bottom", fontsize=5, color=MUTED, zorder=6)
+
+    g = lambda name: coef(ph, FIT_CS, name)[0]
     xs = np.array(XLIM)
     fits = []
     if np.isfinite(g("h2_Unrel")):
         fits.append((xs, g("h2_Unrel") * xs, "--", r"$h^2_{Unrel}$"))
-    if np.isfinite(g("h2_OneSlope")):
-        fits.append((xs, g("h2_OneSlope") * xs, ":", r"$h^2_{OneSlope}$"))
     if np.isfinite(g("h2_Rel")):
         hi = np.array([HE.U_HI, HE.R_HI])
         fits.append((hi, g("h2_Rel") * hi, "-.", r"$h^2_{Rel}$"))
@@ -421,36 +428,30 @@ for ph in ORDER:
             a = np.array([lo, hi])
             fits.append((a, g("h2_RelOffsets") * a + off, "-",
                          r"$h^2_{RelOffsets}$ + band" if k == 0 else None))
-    if np.isfinite(g("b2_FS")):
-        a = np.array([0.4, 0.6])
-        fits.append((a, g("b2_FS.slope") * a + g("b2_FS") / 2, (0, (1, 1)), r"$b^2_{FS}$ fit"))
-    for x, y, ls, lab in fits:
-        ax.plot(x, y, ls=ls, lw=0.9, color="0.35", alpha=0.75, zorder=5, label=lab)
+    for x, y, ls, lab_ in fits:
+        ax.plot(x, y, ls=ls, lw=1.0, color=INK2, alpha=0.7, zorder=5, label=lab_)
 
     for lo, _ in HE.DEG_BANDS.values():
-        ax.axvline(lo, color="0.85", lw=0.6, zorder=0)
-    ax.axhline(0, color="grey", lw=.4)
+        ax.axvline(lo, color=GRID, lw=0.7, zorder=0)
+    ax.axhline(0, color=AXIS, lw=0.9)
     ax.set_xlim(*XLIM)
     ax.set_xlabel(r"GRM relatedness  $a_{ij}$")
     ax.set_ylabel(r"mean phenotype cross-product  $\overline{y_i y_j}$")
 
     coef_panel(axh, ph, H2_ROWS)
     coef_panel(axb, ph, B2_ROWS)
-    axh.set_title("estimates (± jackknife SE)", fontsize=9)
+    axh.set_title("estimates ± jackknife SE")
 
-    cls_h = [Line2D([], [], lw=0, marker=MARK[c], ms=MS + 1, mfc=CMAP[c](0.75), mec="0.3", label=c)
+    cls_h = [Line2D([], [], lw=0, marker=CLASS_MARK[c], ms=MS + 1, color=INK2, label=c)
              for c in ("other", "FS", "PO")]
-    fit_h = [Line2D([], [], ls=ls, lw=0.9, color="0.35", label=lab)
-             for _, _, ls, lab in fits if lab]
-    cov_h = [Line2D([], [], color=plt.cm.Greys(SHADE[cs]), lw=4, label=cs) for cs in tables]
-    leg = ax.legend(handles=cls_h + fit_h, fontsize=8, loc="upper left", framealpha=.9)
-    ax.add_artist(leg)
-    ax.legend(handles=cov_h, fontsize=8, loc="lower right", title="covariate set",
-              title_fontsize=8, framealpha=.9)
-    fig.suptitle(f"{ph} — {SAMPLE_SET}, {FIT_TF}, noPO; bins with n$\\geq${MIN_N}; "
-                 "grey rules = degree bands",
-                 color=CAT_COL[CATEGORY.get(ph, "uncategorised")])
-    plt.savefig(f"{OUT}/plots/{ph}_fits_{FIT_TF}.png", dpi=110, bbox_inches="tight")
+    fit_h = [Line2D([], [], ls=ls, lw=1.0, color=INK2, label=lab_)
+             for _, _, ls, lab_ in fits if lab_]
+    ax.legend(handles=cls_h + fit_h, loc="upper left", ncol=2)
+    fig.legend(handles=cs_handles(), loc="lower center", bbox_to_anchor=(0.42, -0.04),
+               ncol=len(COVSETS), title="covariate set", title_fontsize=8)
+    fig.suptitle(f"{ph} — {SAMPLE_SET}, {FIT_TF}, noPO; bins with n ≥ {MIN_N}; "
+                 f"fits for {FIT_CS}; small numbers are pair counts")
+    plt.savefig(f"{OUT}/plots/{ph}_fits_{FIT_TF}.png", dpi=150, bbox_inches="tight")
     plt.show()
 ```
 

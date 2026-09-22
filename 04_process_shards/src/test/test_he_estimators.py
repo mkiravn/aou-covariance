@@ -117,6 +117,30 @@ def main():
     fails += len(bad)
     print(f"\njackknife SEs finite and positive under noise: {len(expect) - len(bad)}/{len(expect)}")
 
+    # the data carry band offsets, so the offset models must fit and predict better
+    fit, contrasts = E.compare_models(S, N, mid, NBLOCKS)
+    fit = fit.set_index("model")
+    contrasts = contrasts.set_index("contrast")
+    print("\n" + fit.round(4).to_string())
+    print(contrasts.round(3).to_string())
+    for name, cond, msg in (
+        ("chi2 favours offsets",
+         fit.loc["h2_RelOffsets", "chi2_per_bin"] < fit.loc["h2_Rel", "chi2_per_bin"],
+         "adding band offsets lowers misfit"),
+        ("cv no worse",
+         fit.loc["h2_RelOffsets", "cv_error"] <= fit.loc["h2_OneSlope", "cv_error"] * 1.01,
+         "held-out error is small here: each replicate leaves out 2/nblocks of the pairs"),
+        ("offset contrasts positive",
+         min(contrasts.loc[c, "delta_chi2_per_bin"]
+             for c in ("offsets, one slope", "offsets, two slopes")) > 0,
+         "adding the term the data were generated with improves fit"),
+        ("nothing left to add",
+         abs(contrasts.loc["second slope, with offsets", "delta_chi2_per_bin"]) < 1e-6,
+         "a second slope adds nothing once the offsets are in"),
+    ):
+        fails += not cond
+        print(f"{'OK  ' if cond else 'FAIL'} {name:<24}({msg})")
+
     print("\nPASS -- estimators recover generating values" if not fails else f"\nFAIL ({fails})")
     sys.exit(1 if fails else 0)
 

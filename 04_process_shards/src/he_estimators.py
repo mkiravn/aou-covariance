@@ -154,6 +154,99 @@ def estimates(S, N, r, mid):
     return out
 
 
+def _offsets(a):
+    return np.column_stack([_ind(a, lo, hi) for lo, hi in DEG_BANDS.values()])
+
+
+# the ladder as (ranges, design), for fit comparison; readouts live in estimates()
+LADDER = {
+    "h2_OneSlope": ([(-np.inf, R_HI)], lambda a: a[:, None]),
+    "h2_Rel": ([(-np.inf, R_HI)], lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI)]),
+    "h2_OneSlopeOffsets": ([(-np.inf, U_HI), (T_HI, R_HI)],
+                           lambda a: np.c_[a, _offsets(a)]),
+    "h2_RelOffsets": ([(-np.inf, U_HI), (T_HI, R_HI)],
+                      lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI), _offsets(a)]),
+}
+# nested pairs: (simpler, richer); the richer model adds the named term
+NESTED = {"offsets, one slope": ("h2_OneSlope", "h2_OneSlopeOffsets"),
+          "offsets, two slopes": ("h2_Rel", "h2_RelOffsets"),
+          "second slope, no offsets": ("h2_OneSlope", "h2_Rel"),
+          "second slope, with offsets": ("h2_OneSlopeOffsets", "h2_RelOffsets")}
+
+
+def _cells(S, N, r, ci, mid, ranges):
+    """Bin midpoints, means and counts for replicate r over these ranges."""
+    s, n = S[r, ci].sum(0), N[r, ci].sum(0)
+    inside = np.zeros(len(mid), dtype=bool)
+    for lo, hi in ranges:
+        inside |= (mid >= lo) & (mid < hi)
+    k = inside & (n > 0)
+    return mid[k], np.divide(s[k], n[k], where=n[k] > 0), n[k], k
+
+
+def _fit_predict(S, N, r, ci, mid, ranges, design):
+    a, m, n, k = _cells(S, N, r, ci, mid, ranges)
+    X = design(a)
+    beta = _wls(X, m, n)
+    return (None, None, None) if beta is None else (X @ beta, k, beta)
+
+
+def compare_models(S, N, mid, nblocks, classes=NOPO):
+    """Fit and prediction comparison of the ladder rungs.
+
+    Returns (fit, contrasts).  `fit` holds, per rung, chi-square per bin of the
+    full-data fit against each bin's own jackknife SE, and a cross-validated
+    error: every replicate is fit on its own data and scored on the pairs it
+    leaves out (the full data minus that replicate), which are disjoint from
+    what it was fit on.  `contrasts` holds, per nested pair, the change in
+    chi-square per bin with a delete-block jackknife SE.
+    """
+    ci = [CLS.index(c) for c in classes]
+    reps = np.divide(S[1:, ci].sum(1), N[1:, ci].sum(1),
+                     out=np.full((nblocks, len(mid)), np.nan), where=N[1:, ci].sum(1) > 0)
+    se_bin = np.sqrt((nblocks - 1) / nblocks * np.nansum((reps - np.nanmean(reps, 0)) ** 2, 0))
+
+    def chi2_per_bin(r, name):
+        ranges, design = LADDER[name]
+        pred, k, beta = _fit_predict(S, N, r, ci, mid, ranges, design)
+        if pred is None:
+            return np.nan
+        _, m, _, _ = _cells(S, N, r, ci, mid, ranges)
+        ok = k & (se_bin > 0)
+        use = ok[k]
+        df = max(int(ok.sum()) - design(mid[k]).shape[1], 1)
+        return float((((m[use] - pred[use]) / se_bin[ok]) ** 2).sum() / df)
+
+    fit_rows = []
+    for name in LADDER:
+        ranges, design = LADDER[name]
+        cv = []
+        for r in range(1, nblocks + 1):
+            pred, k, beta = _fit_predict(S, N, r, ci, mid, ranges, design)
+            if pred is None:
+                continue
+            s_out = S[0, ci].sum(0) - S[r, ci].sum(0)      # pairs this replicate left out
+            n_out = N[0, ci].sum(0) - N[r, ci].sum(0)
+            held = k & (n_out > 0)
+            if not held.any():
+                continue
+            m_out = s_out[held] / n_out[held]
+            cv.append(float((n_out[held] * (m_out - pred[held[k]]) ** 2).sum() / n_out[held].sum()))
+        fit_rows.append({"model": name, "chi2_per_bin": chi2_per_bin(0, name),
+                         "cv_error": float(np.mean(cv)) if cv else np.nan})
+
+    contrast_rows = []
+    for label, (simple, rich) in NESTED.items():
+        delta = [chi2_per_bin(r, simple) - chi2_per_bin(r, rich) for r in range(nblocks + 1)]
+        d = np.array(delta[1:], dtype=float)
+        d = d[np.isfinite(d)]
+        se = (np.sqrt((len(d) - 1) / len(d) * np.sum((d - d.mean()) ** 2))
+              if len(d) == nblocks else np.nan)
+        contrast_rows.append({"contrast": label, "adds": rich, "delta_chi2_per_bin": delta[0],
+                              "se": se, "z": delta[0] / se if se and np.isfinite(se) else np.nan})
+    return pd.DataFrame(fit_rows), pd.DataFrame(contrast_rows)
+
+
 def jackknife(S, N, mid, nblocks):
     """Point estimates on the full data with delete-block jackknife SEs.
     SE is NaN unless every block's replicate produced a finite estimate."""
