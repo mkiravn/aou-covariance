@@ -48,11 +48,22 @@ os.makedirs(LOCAL, exist_ok=True)
 KG_DIR = f"{WS}/1000g_reference"
 KG_BFILE = f"{KG_DIR}/1kg_all_qc"
 KG_PANEL = f"{KG_DIR}/integrated_call_samples_v3.20130502.ALL.panel"
+KG_ACOUNT_GS = f"{WS_GS}/1000g_reference/1kg_all_qc.acount"
 EUR_POPS = ["CEU", "GBR", "FIN", "TSI", "IBS"]
 ANCHOR_POPS = ["CEU", "GBR"]
 
-BANDS = {"common": (0.01, 0.5), "lowfreq": (0.001, 0.01)}   # MAF floor, ceiling
-TARGET_PER_BAND = 200_000
+# Each arm is a variant set to run the PCA on. hm3: True keeps only HapMap3
+# variants, False keeps only the rest, None ignores the split. Add an arm by
+# adding an entry.
+ARMS = {
+    "hm3":        {"maf": (0.01, 0.5),   "hm3": True},
+    "panel":      {"maf": (0.01, 0.5),   "hm3": None},
+    "non_hm3":    {"maf": (0.01, 0.5),   "hm3": False},
+    # "lowfreq":  {"maf": (0.001, 0.01), "hm3": None},
+}
+THIN_TO = None                 # None keeps every pruned variant; set a number to cut
+                               # each arm to it, which makes the arms differ only in
+                               # which variants they hold, not how many
 PRUNE = "1000kb 1 0.05"        # kb window: plink2 requires the step to be 1
 PRUNE_PASSES = 2               # a second pass catches LD the first window missed
 N_PCS_FIT = 20
@@ -159,14 +170,20 @@ LD_REGIONS_GS = f"{OUT_GS}/exclude_regions.txt"
 print(f"{sum(1 for _ in open(LD_REGIONS))} regions excluded -> {LD_REGIONS}")
 ```
 
-## Cell 4 — QC, prune and thin (Batch)
+## Cell 4 — QC and prune each arm (Batch)
 
-One job. QC once, then per band: restrict the frequency range, drop the
-long-range LD regions, prune, and thin to the target. `bed1` is the 1-based
-interval format the region file above uses (`range` is its old alias).
+QC once, then per arm: apply the frequency range, keep or drop the HapMap3
+variants, remove the long-range LD regions, and prune. Thinning happens later,
+once the pruned counts are known, so every arm can be cut to the same size.
+`bed1` is the 1-based interval format the region file uses.
 
 ```python
-MAF_FLOOR = min(lo for lo, _ in BANDS.values())
+MAF_FLOOR = min(a["maf"][0] for a in ARMS.values())
+arm_case = "\n".join(
+    f'        {name}) FLOOR={a["maf"][0]}; CEIL={a["maf"][1]}; '
+    f'HM3={"extract" if a["hm3"] is True else "exclude" if a["hm3"] is False else "none"} ;;'
+    for name, a in ARMS.items())
+
 cmd = f"""
     set -e
     chmod +x "$PLINK_BIN"
@@ -179,40 +196,41 @@ cmd = f"""
       --threads "$VCPUS" --memory "$MEM_MB" --make-pgen --out "$Q"
     echo "after QC: $(grep -vc '^##' "${{Q}}.pvar") variants"
 
-    for BAND in {" ".join(BANDS)}; do
-      case "$BAND" in
-        common)  FLOOR={BANDS['common'][0]};  CEIL={BANDS['common'][1]} ;;
-        lowfreq) FLOOR={BANDS['lowfreq'][0]}; CEIL={BANDS['lowfreq'][1]} ;;
+    # HapMap3 membership: ID+REF+ALT agreement with the 1000G reference
+    grep -v '^##' "${{Q}}.pvar" | awk 'NR>1 {{print $3, $4, $5}}' | LC_ALL=C sort > "${{Q}}_ira.sorted"
+    awk 'NR>1 {{print $2, $3, $4}}' "$KG_ACOUNT" | LC_ALL=C sort > "${{Q}}_kg.sorted"
+    LC_ALL=C comm -12 "${{Q}}_ira.sorted" "${{Q}}_kg.sorted" | awk '{{print $1}}' > "${{OUT_DIR}}/hm3.ids"
+    echo "HapMap3-agreeing: $(wc -l < "${{OUT_DIR}}/hm3.ids")"
+
+    for ARM in {" ".join(ARMS)}; do
+      case "$ARM" in
+{arm_case}
       esac
-      "$PLINK_BIN" --pfile "$Q" --maf "$FLOOR" --max-maf "$CEIL" \
+      case "$HM3" in
+        extract) SEL="--extract ${{OUT_DIR}}/hm3.ids" ;;
+        exclude) SEL="--exclude ${{OUT_DIR}}/hm3.ids" ;;
+        *)       SEL="" ;;
+      esac
+
+      "$PLINK_BIN" --pfile "$Q" --maf "$FLOOR" --max-maf "$CEIL" $SEL \
         --exclude bed1 "$LD_REGIONS" --nonfounders \
         --indep-pairwise {PRUNE} \
-        --threads "$VCPUS" --memory "$MEM_MB" --out "${{Q}}_${{BAND}}"
-      echo "$BAND pruned, pass 1: $(wc -l < "${{Q}}_${{BAND}}.prune.in")"
+        --threads "$VCPUS" --memory "$MEM_MB" --out "${{TMPDIR:-/tmp}}/${{ARM}}"
+      echo "$ARM pruned, pass 1: $(wc -l < "${{TMPDIR:-/tmp}}/${{ARM}}.prune.in")"
 
       for PASS in $(seq 2 {PRUNE_PASSES}); do
-        "$PLINK_BIN" --pfile "$Q" --extract "${{Q}}_${{BAND}}.prune.in" --nonfounders \
+        "$PLINK_BIN" --pfile "$Q" --extract "${{TMPDIR:-/tmp}}/${{ARM}}.prune.in" --nonfounders \
           --indep-pairwise {PRUNE} \
-          --threads "$VCPUS" --memory "$MEM_MB" --out "${{Q}}_${{BAND}}_p${{PASS}}"
-        mv "${{Q}}_${{BAND}}_p${{PASS}}.prune.in" "${{Q}}_${{BAND}}.prune.in"
-        echo "$BAND pruned, pass $PASS: $(wc -l < "${{Q}}_${{BAND}}.prune.in")"
+          --threads "$VCPUS" --memory "$MEM_MB" --out "${{TMPDIR:-/tmp}}/${{ARM}}_p${{PASS}}"
+        mv "${{TMPDIR:-/tmp}}/${{ARM}}_p${{PASS}}.prune.in" "${{TMPDIR:-/tmp}}/${{ARM}}.prune.in"
+        echo "$ARM pruned, pass $PASS: $(wc -l < "${{TMPDIR:-/tmp}}/${{ARM}}.prune.in")"
       done
-      NPRUNED=$(wc -l < "${{Q}}_${{BAND}}.prune.in")
-      THIN=""
-      if [ "$NPRUNED" -gt {TARGET_PER_BAND} ]; then THIN="--thin-count {TARGET_PER_BAND}"; fi
-
-      "$PLINK_BIN" --pfile "$Q" --extract "${{Q}}_${{BAND}}.prune.in" \
-        $THIN --seed {SEED} --nonfounders \
-        --threads "$VCPUS" --memory "$MEM_MB" --make-pgen \
-        --out "${{OUT_DIR}}/pca_${{BAND}}"
-      echo "$BAND kept: $(grep -vc '^##' "${{OUT_DIR}}/pca_${{BAND}}.pvar")"
+      cp "${{TMPDIR:-/tmp}}/${{ARM}}.prune.in" "${{OUT_DIR}}/${{ARM}}.prune.in"
     done
 
-    cat "${{OUT_DIR}}/pca_common.pvar" "${{OUT_DIR}}/pca_lowfreq.pvar" \
-      | awk '$1 !~ /^#/ {{print $3}}' | sort -u > "${{TMPDIR:-/tmp}}/both.ids"
-    "$PLINK_BIN" --pfile "$Q" --extract "${{TMPDIR:-/tmp}}/both.ids" --nonfounders \
-      --threads "$VCPUS" --memory "$MEM_MB" --make-pgen --out "${{OUT_DIR}}/pca_both"
-    echo "both kept: $(grep -vc '^##' "${{OUT_DIR}}/pca_both.pvar")"
+    cp "${{Q}}.pgen" "${{OUT_DIR}}/qc.pgen"
+    cp "${{Q}}.pvar" "${{OUT_DIR}}/qc.pvar"
+    cp "${{Q}}.psam" "${{OUT_DIR}}/qc.psam"
 """
 open(f"{LOCAL}/qc_cmd.sh", "w").write(cmd)
 
@@ -222,7 +240,7 @@ dsub --provider google-batch --project {PROJECT_ID} --regions {REGION} \
   --logging {LOGS_GS} --service-account {SERVICE_ACCOUNT} \
   --network {NETWORK} --subnetwork {SUBNETWORK} --use-private-address \
   --image "gcr.io/google.com/cloudsdktool/cloud-sdk:581.0.0-slim" \
-  --name "covpca-qc-{SAMPLE_SET.replace('_', '-')}" \
+  --name "covpca-prune-{SAMPLE_SET.replace('_', '-')}" \
   --machine-type {QC_MACHINE} --disk-size {QC_DISK} \
   --input PANEL_PGEN="{PANEL_GS}.pgen" \
   --input PANEL_PVAR="{PANEL_GS}.pvar" \
@@ -230,6 +248,7 @@ dsub --provider google-batch --project {PROJECT_ID} --regions {REGION} \
   --input PLINK_BIN="{PLINK2_GS}" \
   --input KEEP_PATH="{KEEP_GS}" \
   --input LD_REGIONS="{LD_REGIONS_GS}" \
+  --input KG_ACOUNT="{KG_ACOUNT_GS}" \
   --env VCPUS={QC_MACHINE.rsplit('-', 1)[-1]} --env MEM_MB={QC_MEM_MB} \
   --output-recursive OUT_DIR="{OUT_GS}/panels" \
   --script {LOCAL}/qc_cmd.sh
@@ -247,42 +266,68 @@ print(subprocess.run(["bash", "-c",
     capture_output=True, text=True).stdout[-3000:])
 ```
 
-## Cell 6 — PCA per band (Batch)
+## Cell 5b — pruned counts
 
-One task per band. Each fits the PCA, writes loadings and allele counts, then
-re-scores the same participants through those loadings, so every set of scores
-sits on `--score` coordinates and is directly comparable.
+Each arm keeps what pruning left it. Set `THIN_TO` in Cell 1 if you would
+rather every arm carry the same number of variants, which separates "which
+variants" from "how many" at the cost of discarding some.
+
+```python
+counts = {a: sum(1 for _ in open(f"{OUT}/panels/{a}.prune.in")) for a in ARMS}
+C_ = pd.Series(counts, name="pruned").to_frame()
+C_["used"] = [min(n, THIN_TO) if THIN_TO else n for n in C_["pruned"]]
+print(C_.to_string())
+if THIN_TO is None and max(counts.values()) > 1.5 * min(counts.values()):
+    print("\nthe arms differ in size by more than half; PC precision rises with marker "
+          "count, so read a difference between them with that in mind")
+```
+
+## Cell 6 — thin and fit the PCA per arm (Batch)
+
+One task per arm: fit the PCA with loadings on whatever that arm kept (thinned
+first only if `THIN_TO` is set), then re-score the same participants through
+those loadings so every arm's scores sit on `--score` coordinates.
 
 ```python
 TASKS = f"{LOCAL}/pca_tasks.tsv"
 with open(TASKS, "w") as f:
-    f.write("--env BAND\t--input PGEN\t--input PVAR\t--input PSAM\n")
-    for band in list(BANDS) + ["both"]:
-        f.write(f"{band}\t{OUT_GS}/panels/pca_{band}.pgen\t"
-                f"{OUT_GS}/panels/pca_{band}.pvar\t{OUT_GS}/panels/pca_{band}.psam\n")
+    f.write("--env ARM\n")
+    for a in ARMS:
+        f.write(f"{a}\n")
 
 pca_cmd = f"""
     set -e
     chmod +x "$PLINK_BIN"
-    P="${{TMPDIR:-/tmp}}/in"
-    cp "$PGEN" "${{P}}.pgen"; cp "$PVAR" "${{P}}.pvar"; cp "$PSAM" "${{P}}.psam"
+    P="${{TMPDIR:-/tmp}}/${{ARM}}"
+
+    THIN=""
+    if [ -n "$THIN_TO" ] && [ "$(wc -l < "$PRUNE_IN")" -gt "$THIN_TO" ]; then
+      THIN="--thin-count $THIN_TO"
+    fi
+
+    "$PLINK_BIN" --pgen "$QC_PGEN" --pvar "$QC_PVAR" --psam "$QC_PSAM" \
+      --extract "$PRUNE_IN" $THIN --seed {SEED} --nonfounders \
+      --threads "$VCPUS" --memory "$MEM_MB" --make-pgen --out "$P"
+    echo "$ARM variants: $(grep -vc '^##' "${{P}}.pvar")"
 
     "$PLINK_BIN" --pfile "$P" --nonfounders --freq counts \
       --pca approx {N_PCS_FIT} allele-wts \
-      --threads "$VCPUS" --memory "$MEM_MB" --out "${{OUT_DIR}}/${{BAND}}"
+      --threads "$VCPUS" --memory "$MEM_MB" --out "${{OUT_DIR}}/${{ARM}}"
 
-    W="${{OUT_DIR}}/${{BAND}}.eigenvec.allele"
+    W="${{OUT_DIR}}/${{ARM}}.eigenvec.allele"
     HEADER=$(head -1 "$W")
-    ID=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'ID' | cut -d: -f1)
-    A1=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'A1' | cut -d: -f1)
-    P1=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'PC1' | cut -d: -f1)
-    PK=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'PC{N_PCS_FIT}' | cut -d: -f1)
+    ID=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'ID' | cut -d: -f1)
+    A1=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'A1' | cut -d: -f1)
+    P1=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'PC1' | cut -d: -f1)
+    PK=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'PC{N_PCS_FIT}' | cut -d: -f1)
 
     "$PLINK_BIN" --pfile "$P" --nonfounders \
-      --read-freq "${{OUT_DIR}}/${{BAND}}.acount" \
+      --read-freq "${{OUT_DIR}}/${{ARM}}.acount" \
       --score "$W" "$ID" "$A1" header-read no-mean-imputation variance-standardize \
       --score-col-nums "${{P1}}-${{PK}}" \
-      --threads "$VCPUS" --memory "$MEM_MB" --out "${{OUT_DIR}}/${{BAND}}_scores"
+      --threads "$VCPUS" --memory "$MEM_MB" --out "${{OUT_DIR}}/${{ARM}}_scores"
+
+    cp "${{P}}.pvar" "${{OUT_DIR}}/${{ARM}}_variants.pvar"
 """
 open(f"{LOCAL}/pca_cmd.sh", "w").write(pca_cmd)
 
@@ -295,6 +340,10 @@ dsub --provider google-batch --project {PROJECT_ID} --regions {REGION} \
   --name "covpca-{SAMPLE_SET.replace('_', '-')}" \
   --machine-type {PCA_MACHINE} --disk-size {PCA_DISK} \
   --input PLINK_BIN="{PLINK2_GS}" \
+  --input QC_PGEN="{OUT_GS}/panels/qc.pgen" \
+  --input QC_PVAR="{OUT_GS}/panels/qc.pvar" \
+  --input QC_PSAM="{OUT_GS}/panels/qc.psam" \
+  --input PRUNE_IN="{OUT_GS}/panels/${{ARM}}.prune.in" \
   --env VCPUS={PCA_MACHINE.rsplit('-', 1)[-1]} --env MEM_MB={PCA_MEM_MB} \
   --output-recursive OUT_DIR="{OUT_GS}/pca" \
   --tasks {TASKS} \
@@ -304,11 +353,11 @@ print(job.stdout or job.stderr)
 PCA_JOB = job.stdout.strip().splitlines()[-1] if job.stdout else None
 ```
 
-## Cell 7 — read the three PCAs, project 1000G
+## Cell 7 — read each arm, project 1000G
 
 ```python
 PC = [f"PC{k}" for k in range(1, N_PCS_FIT + 1)]
-BAND_LIST = list(BANDS) + ["both"]
+ARM_LIST = list(ARMS)
 
 
 def read_scores(path, id_name):
@@ -319,73 +368,108 @@ def read_scores(path, id_name):
     return d[[id_name] + PC]
 
 
-scores = {b: read_scores(f"{OUT}/pca/{b}_scores.sscore", "person_id") for b in BAND_LIST}
-eigen = {b: np.loadtxt(f"{OUT}/pca/{b}.eigenval") for b in BAND_LIST}
+scores = {a: read_scores(f"{OUT}/pca/{a}_scores.sscore", "person_id") for a in ARM_LIST}
+eigen = {a: np.loadtxt(f"{OUT}/pca/{a}.eigenval") for a in ARM_LIST}
 
 kg_scores = {}
-for b in BAND_LIST:
-    sh = f"""
+for a in ARM_LIST:
+    sh_ = f"""
     set -eo pipefail
-    grep -v '^##' "{OUT}/panels/pca_{b}.pvar" | awk 'NR>1 {{print $3, $4, $5}}' | LC_ALL=C sort > "{LOCAL}/{b}_ira.sorted"
+    grep -v '^##' "{OUT}/pca/{a}_variants.pvar" | awk 'NR>1 {{print $3, $4, $5}}' | LC_ALL=C sort > "{LOCAL}/{a}_ira.sorted"
     awk 'NR>1 {{print $2, $3, $4}}' "{KG_BFILE}.acount" | LC_ALL=C sort > "{LOCAL}/kg_ira.sorted"
-    LC_ALL=C comm -12 "{LOCAL}/{b}_ira.sorted" "{LOCAL}/kg_ira.sorted" | awk '{{print $1}}' > "{LOCAL}/{b}_kg.ids"
-    W="{OUT}/pca/{b}.eigenvec.allele"
+    LC_ALL=C comm -12 "{LOCAL}/{a}_ira.sorted" "{LOCAL}/kg_ira.sorted" | awk '{{print $1}}' > "{LOCAL}/{a}_kg.ids"
+    N=$(wc -l < "{LOCAL}/{a}_kg.ids")
+    echo "{a}: $N variants shared with 1000G"
+    if [ "$N" -lt 1000 ]; then exit 0; fi
+    W="{OUT}/pca/{a}.eigenvec.allele"
     HEADER=$(head -1 "$W")
-    ID=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'ID' | cut -d: -f1)
-    A1=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'A1' | cut -d: -f1)
-    P1=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'PC1' | cut -d: -f1)
-    PK=$(echo "$HEADER" | tr '\\t' '\\n' | grep -nx 'PC{N_PCS_FIT}' | cut -d: -f1)
-    plink2 --bfile "{KG_BFILE}" --extract "{LOCAL}/{b}_kg.ids" --nonfounders \
-      --read-freq "{OUT}/pca/{b}.acount" \
+    ID=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'ID' | cut -d: -f1)
+    A1=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'A1' | cut -d: -f1)
+    P1=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'PC1' | cut -d: -f1)
+    PK=$(echo "$HEADER" | tr '\t' '\n' | grep -nx 'PC{N_PCS_FIT}' | cut -d: -f1)
+    plink2 --bfile "{KG_BFILE}" --extract "{LOCAL}/{a}_kg.ids" --nonfounders \
+      --read-freq "{OUT}/pca/{a}.acount" \
       --score "$W" "$ID" "$A1" header-read no-mean-imputation variance-standardize \
-      --score-col-nums "${{P1}}-${{PK}}" --out "{LOCAL}/kg_in_{b}"
+      --score-col-nums "${{P1}}-${{PK}}" --out "{LOCAL}/kg_in_{a}"
     """
-    subprocess.run(["bash", "-c", sh], check=True)
-    kg_scores[b] = read_scores(f"{LOCAL}/kg_in_{b}.sscore", "sample").merge(
-        pd.read_csv(KG_PANEL, sep=r"\s+")[["sample", "pop", "super_pop"]], on="sample", how="left")
-    print(f"{b}: {sum(1 for _ in open(f'{LOCAL}/{b}_kg.ids')):,} variants for the 1000G projection")
+    subprocess.run(["bash", "-c", sh_], check=True)
+    if os.path.isfile(f"{LOCAL}/kg_in_{a}.sscore"):
+        kg_scores[a] = read_scores(f"{LOCAL}/kg_in_{a}.sscore", "sample").merge(
+            pd.read_csv(KG_PANEL, sep=r"\s+")[["sample", "pop", "super_pop"]],
+            on="sample", how="left")
+    else:
+        print(f"  {a}: too few shared variants to project 1000G")
 ```
 
-## Cell 8 — do the low-frequency PCs add anything?
+The non-HapMap3 arm shares little with the 1000G reference by construction, so
+its projection may be skipped. That is expected: it can describe structure, but
+it cannot carry the anchor.
 
-`anchor_sep` is how far CEU + GBR sit from the other European populations on
-each PC, in participant SDs. `max_|r|` is the strongest correlation of that PC
-with any common-band PC: near 1 means it is already covered.
+## Cell 8 — do the arms agree?
+
+For each arm, every PC is matched to its best counterpart in the reference arm
+by absolute correlation. A PC matching above about 0.95 carries nothing new; a
+low match is either real extra structure or noise, which the next two cells
+separate.
 
 ```python
-common = scores["common"]
-rows = []
-for b in BAND_LIST:
-    s, kg = scores[b], kg_scores[b]
-    for k, p in enumerate(PC, 1):
-        a = kg[kg["pop"].isin(ANCHOR_POPS)][p].mean()
-        o = kg[kg["pop"].isin(set(EUR_POPS) - set(ANCHOR_POPS))][p].mean()
-        r = (np.abs(np.corrcoef(s[p], common[PC].to_numpy().T)[0, 1:]).max()
-             if b != "common" else np.nan)
-        rows.append({"band": b, "PC": p, "pct_var": eigen[b][k - 1] / eigen[b].sum() * 100,
-                     "anchor_sep": abs(a - o) / s[p].std(), "max_|r| vs common": r})
-D = pd.DataFrame(rows)
-D.to_csv(f"{OUT}/pc_comparison.tsv", sep="\t", index=False)
-print(D.pivot(index="PC", columns="band", values="anchor_sep").reindex(PC).round(2).to_string())
+REF_ARM = ARM_LIST[0]
+K_CMP = min(10, N_PCS_FIT)
+
+best = {}
+for a in ARM_LIST:
+    if a == REF_ARM:
+        continue
+    j = scores[REF_ARM].merge(scores[a], on="person_id", suffixes=("_ref", "_arm"))
+    M = np.abs(np.corrcoef(j[[f"{p}_arm" for p in PC[:K_CMP]]].to_numpy(),
+                           j[[f"{p}_ref" for p in PC[:K_CMP]]].to_numpy(),
+                           rowvar=False)[:K_CMP, K_CMP:])
+    best[a] = pd.Series(M.max(1), index=PC[:K_CMP])
+B = pd.DataFrame(best)
+B.to_csv(f"{OUT}/arm_pc_agreement.tsv", sep="\t")
+print("best |r| with any PC of the reference arm")
+print(B.round(3).to_string())
+
+sep = {}
+for a in ARM_LIST:
+    if a not in kg_scores:
+        continue
+    kgs = kg_scores[a]
+    anch = kgs["pop"].isin(ANCHOR_POPS)
+    other = kgs["pop"].isin(set(EUR_POPS) - set(ANCHOR_POPS))
+    sep[a] = pd.Series(
+        [abs(kgs.loc[anch, p].mean() - kgs.loc[other, p].mean()) / scores[a][p].std()
+         for p in PC[:K_CMP]], index=PC[:K_CMP])
+S_ = pd.DataFrame(sep)
 
 fig, axes = plt.subplots(1, 3, figsize=(16, 4.2))
-for b in BAND_LIST:
-    d = D[D["band"] == b]
-    axes[0].plot(range(1, N_PCS_FIT + 1), d["pct_var"], marker="o", ms=3, label=b)
-    axes[1].plot(range(1, N_PCS_FIT + 1), d["anchor_sep"], marker="o", ms=3, label=b)
-    if b != "common":
-        axes[2].plot(range(1, N_PCS_FIT + 1), d["max_|r| vs common"], marker="o", ms=3, label=b)
-axes[0].set_ylabel("% variance"); axes[1].set_ylabel("anchor separation (SD)")
-axes[2].set_ylabel("max |r| with a common-band PC"); axes[2].set_ylim(0, 1)
-for ax in axes:
-    ax.set_xlabel("PC"); ax.legend(fontsize=8)
-fig.suptitle(f"{SAMPLE_SET} covariate PCs — common vs low-frequency")
+for a in ARM_LIST:
+    ev = eigen[a]
+    axes[0].plot(range(1, len(ev) + 1), ev / ev.sum() * 100, marker="o", ms=3, label=a)
+axes[0].set_xlabel("PC"); axes[0].set_ylabel("% variance"); axes[0].legend(fontsize=8)
+axes[0].set_title("scree")
+
+for a in B:
+    axes[1].plot(range(1, K_CMP + 1), B[a], marker="o", ms=3, label=a)
+axes[1].axhline(0.95, color="0.7", ls=":", lw=1)
+axes[1].set_ylim(0, 1.02)
+axes[1].set_xlabel("PC"); axes[1].set_ylabel(f"best |r| with {REF_ARM}")
+axes[1].legend(fontsize=8)
+axes[1].set_title("agreement with the reference arm")
+
+for a in S_:
+    axes[2].plot(range(1, K_CMP + 1), S_[a], marker="o", ms=3, label=a)
+axes[2].set_xlabel("PC"); axes[2].set_ylabel("anchor separation (participant SD)")
+axes[2].legend(fontsize=8)
+axes[2].set_title("CEU + GBR vs other European populations")
+fig.suptitle(f"{SAMPLE_SET} covariate PCA — "
+             + ", ".join(f"{a} ({C_.loc[a, 'used']:,})" for a in ARM_LIST))
 plt.tight_layout()
-plt.savefig(f"{OUT}/band_comparison.png", dpi=130, bbox_inches="tight")
+plt.savefig(f"{OUT}/arm_comparison.png", dpi=130, bbox_inches="tight")
 plt.show()
 ```
 
-## Cell 7b — LD peaks in the loadings
+## Cell 9 — LD peaks in the loadings
 
 A PC carried by one region is LD, not structure. This flags variants whose
 squared loading is far above the rest, widens each to a window, and writes them
@@ -396,8 +480,8 @@ file is the long-range regions plus these, so the next fit drops them.
 PEAK_Q, FLANK_KB, PEAK_PCS = 0.9995, 250, min(10, N_PCS_FIT)
 
 found = []
-for b in BAND_LIST:
-    L = pd.read_csv(f"{OUT}/pca/{b}.eigenvec.allele", sep=r"\s+")
+for a in ARM_LIST:
+    L = pd.read_csv(f"{OUT}/pca/{a}.eigenvec.allele", sep=r"\s+")
     idc = "#ID" if "#ID" in L.columns else "ID"
     L[["CHROM", "POS"]] = L[idc].str.split(":", n=2, expand=True).iloc[:, :2]
     L["POS"] = L["POS"].astype(int)
@@ -407,9 +491,9 @@ for b in BAND_LIST:
         hit |= v > np.quantile(v, PEAK_Q)
     if hit.any():
         h = L.loc[hit, ["CHROM", "POS"]].copy()
-        h["band"] = b
+        h["arm"] = a
         found.append(h)
-    print(f"{b}: {int(hit.sum())} loading outliers over PC1-{PEAK_PCS}")
+    print(f"{a}: {int(hit.sum())} loading outliers over PC1-{PEAK_PCS}")
 
 if found:
     H = pd.concat(found).sort_values(["CHROM", "POS"])
@@ -432,10 +516,10 @@ else:
     print("\nno peaks; nothing to exclude")
 ```
 
-## Cell 9 — are the low-frequency PCs technical?
+## Cell 10 — is any of it technical?
 
 Set `META` to a sample-level metadata table if one exists; the check is skipped
-otherwise. R² of each PC on a batch or site factor says whether it is tracking
+otherwise. R² of a PC on a batch or site factor says whether it tracks
 sequencing rather than ancestry.
 
 ```python
@@ -445,26 +529,26 @@ META_ID, META_FACTORS = "research_id", ["site_id", "sequencing_center"]
 if META and os.path.isfile(META):
     m = pd.read_csv(META, sep="\t", dtype=str)
     m = m.rename(columns={META_ID: "person_id"})
-    for b in BAND_LIST:
-        j = scores[b].merge(m, on="person_id", how="inner")
+    for a in ARM_LIST:
+        j = scores[a].merge(m, on="person_id", how="inner")
         out = {}
         for f in META_FACTORS:
             if f not in j:
                 continue
             g = j.groupby(f)
             out[f] = [float(1 - g[p].transform("var").mean() / j[p].var()) for p in PC[:5]]
-        print(f"\n{b}: R² of PC1-5 on each factor")
+        print(f"\n{a}: R² of PC1-5 on each factor")
         print(pd.DataFrame(out, index=PC[:5]).round(3).to_string())
 else:
     print("no metadata table set; skipping the batch check")
 ```
 
-## Cell 10 — write the covariate PCs
+## Cell 11 — write the covariate PCs
 
 ```python
-BAND_FOR_COVARIATES = "common"      # change only if Cell 8 and 9 justify it
+ARM_FOR_COVARIATES = ARM_LIST[0]      # change once Cells 8-10 justify it
 
-cov = scores[BAND_FOR_COVARIATES][["person_id"] + PC[:N_PCS_COVARIATE]].copy()
+cov = scores[ARM_FOR_COVARIATES][["person_id"] + PC[:N_PCS_COVARIATE]].copy()
 cov = cov.rename(columns={"person_id": "IID"})
 COV_PATH = f"{OUT}/final_pca_pc_covariates_{SAMPLE_SET}.txt"
 cov.to_csv(COV_PATH, sep="\t", index=False)
@@ -473,16 +557,20 @@ with open(f"{OUT}/covariate_pca_provenance.txt", "w") as f:
     f.write(f"panel\tunified_panel_{CDR_VERSION}, pooled --maf 0.001 at build time\n"
             f"qc\t--snps-only just-acgt --max-alleles 2 --rm-dup exclude-all "
             f"--maf {MAF_FLOOR} --geno 0.01 --hwe 1e-6 0 keep-fewhet --nonfounders\n"
-            f"bands\t{BANDS}\n"
-            f"prune\t--indep-pairwise {PRUNE}, long-range LD regions excluded (bed1)\n"
-            f"thin\t--thin-count {TARGET_PER_BAND} --seed {SEED} per band\n"
+            f"arms\t{ARMS}\n"
+            f"prune\t--indep-pairwise {PRUNE}, {PRUNE_PASSES} passes, "
+            f"long-range LD regions and detected peaks excluded (bed1)\n"
+            f"thin\t{'--thin-count ' + str(THIN_TO) if THIN_TO else 'none; every pruned variant kept'}\n"
+            f"variants\t{dict(C_['used'])}\n"
             f"pca\t--pca approx {N_PCS_FIT} allele-wts, fit on the participants\n"
             f"scores\t--score through the fit's own loadings, --read-freq its .acount\n"
-            f"covariates\tband={BAND_FOR_COVARIATES}, PC1-{N_PCS_COVARIATE}\n")
+            f"covariates\tarm={ARM_FOR_COVARIATES}, PC1-{N_PCS_COVARIATE}\n")
 print(f"{len(cov):,} participants, PC1-{N_PCS_COVARIATE} -> {COV_PATH}")
 ```
 
-## Cell 11 — copy this notebook to the bucket
+## Cell 12 — copy this notebook to the bucket
+
+Save the notebook first, then run this.
 
 ```python
 NOTEBOOK = os.path.expanduser(f"~/notebooks/{SAMPLE_SET}_covariate_pca.ipynb")
