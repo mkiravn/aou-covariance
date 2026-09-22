@@ -5,15 +5,15 @@ keeps those closest to the CEU + GBR centroid. Two alternative gates are built
 for comparison: the participants' own centroid (as eur_D2 did), and the Kemper
 direction, PCA fit on the 1000G Europeans with participants projected in.
 
-The gate is a multivariate normal model of the anchor population, assembled
-from the part of each estimate that is trustworthy: **centre** and **shape**
-from the projected CEU + GBR samples, **scale** from the participants, **size**
-from a target. Projection shrinks each PC by its own factor, which biases the
-anchor's variances but cancels in its correlations, so the correlation matrix is
-taken from the anchor and the per-PC variances from the participants.
+The gate is a multivariate normal model of the anchor population: mean and
+covariance from the projected CEU + GBR samples, Mahalanobis distance under it,
+and a radius tuned to the target size. Same form as round 1, and the same idea
+as Kemper, who kept UK Biobank participants by their probability of belonging
+to the GBR + CEU cluster.
 
-Participants are uncorrelated on their own PCs by construction, so any tilt in
-the gate comes from the anchor's shape, not theirs. Cell 7 checks both.
+Projection shrinks the anchor's scores toward the origin, so its covariance is
+an underestimate. Tuning the radius to a target absorbs the overall scale; what
+the anchor supplies is the relative weighting across PCs and the orientation.
 
 Compute: 16 vCPU, ~100 GB RAM, ~500 GB disk. The PCA fit is the long step.
 
@@ -276,31 +276,30 @@ plt.show()
 Centroid from the projected anchor populations, scale from the participants.
 
 ```python
-SHRINK = 0.2            # anchor correlations toward independence; a few hundred samples
-
 USE = PC[:K_PCS]
+
+
+def mvn(frame):
+    """Mean and shrunk covariance of these samples on the PCs in use."""
+    A = frame[USE].to_numpy()
+    try:
+        from sklearn.covariance import LedoitWolf
+        return A.mean(0), LedoitWolf().fit(A).covariance_
+    except ImportError:                      # same shrinkage target, fixed weight
+        S_ = np.cov(A, rowvar=False)
+        return A.mean(0), 0.9 * S_ + 0.1 * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
+
+
+def distance(frame, mu, C):
+    d = frame[USE].to_numpy() - mu
+    return np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(C), d))
+
+
 anchor = kg[kg["pop"].isin(ANCHOR_POPS)]
-mu = anchor[USE].mean().to_numpy()
-sd = part[USE].std(ddof=1).to_numpy()
+mu, C = mvn(anchor)
+print(f"anchor: {len(anchor)} samples; SD per PC {np.sqrt(np.diag(C)).round(4)}")
 
-off_part = np.abs(np.corrcoef(part[USE].to_numpy(), rowvar=False) - np.eye(K_PCS)).max()
-Ra = np.corrcoef(anchor[USE].to_numpy(), rowvar=False)
-off_anchor = np.abs(Ra - np.eye(K_PCS)).max()
-print(f"largest off-diagonal correlation: participants {off_part:.3f}, anchor {off_anchor:.3f} "
-      f"({len(anchor)} anchor samples)")
-assert off_part < 0.05, "participant PCs are correlated; the PCA fit sample is not what we think"
-
-Ra = (1 - SHRINK) * Ra + SHRINK * np.eye(K_PCS)
-C = np.outer(sd, sd) * Ra            # anchor shape, participant scale
-Cinv = np.linalg.inv(C)
-
-
-def distance(frame, centre):
-    d = frame[USE].to_numpy() - centre
-    return np.sqrt(np.einsum("ij,jk,ik->i", d, Cinv, d))
-
-
-d_anchor = distance(part, mu)
+d_anchor = distance(part, mu, C)
 d_sorted = np.sort(d_anchor)
 
 scan = pd.DataFrame({"target_n": np.linspace(0.8 * TARGET_N, 1.2 * TARGET_N, 5).astype(int)})
@@ -317,7 +316,7 @@ with open(f"{OUT}/round2_provenance.txt", "w") as f:
             f"variants\t{sum(1 for _ in open(f'{LOCAL}/prune.prune.in'))} pruned HM3 sites\n"
             f"anchor\t1000G {'+'.join(ANCHOR_POPS)} projected into that space\n"
             f"pcs\t1-{K_PCS}\n"
-            f"metric\tMahalanobis: anchor correlations (shrunk {SHRINK:g}), participant SDs\n"
+            f"metric\tMahalanobis under the anchor's own shrunk covariance\n"
             f"threshold\t{THRESHOLD:.6f}\nkept\t{int(keep.sum())}\n")
 print(f"{int(keep.sum()):,} kept -> {KEEP_PATH}")
 ```
@@ -333,10 +332,10 @@ shown = rng.choice(np.flatnonzero(keep), size=min(50_000, int(keep.sum())), repl
 cols = dict(zip(EUR_POPS, plt.cm.tab10.colors))
 
 
-def gate_ellipse(ax, centre, i, j, radius, **kw):
+def gate_ellipse(ax, centre, i, j, radius, cov=None, **kw):
     """Gate boundary on PCs i, j: the ellipsoid's shadow, from the 2x2 marginal
-    covariance, so it tilts with the anchor's correlation structure."""
-    M = C[np.ix_([i, j], [i, j])]
+    covariance, so it tilts with the group it was estimated on."""
+    M = (C if cov is None else cov)[np.ix_([i, j], [i, j])]
     vals, vecs = np.linalg.eigh(M)
     ax.add_patch(Ellipse((centre[i], centre[j]), 2 * radius * np.sqrt(vals[-1]),
                          2 * radius * np.sqrt(vals[0]),
@@ -371,8 +370,9 @@ anchor; and the Kemper direction, PCA fit on the 1000G Europeans with
 participants projected in.
 
 ```python
-# a. participants' own centroid, as eur_D2 did
-d_self = distance(part, part[USE].mean().to_numpy())
+# a. participants' own centroid and covariance, as eur_D2 did
+mu_self, C_self = mvn(part)
+d_self = distance(part, mu_self, C_self)
 keep_self = d_self <= np.sort(d_self)[TARGET_N - 1]
 
 # b. Kemper direction: fit on the 1000G Europeans, project participants
@@ -393,12 +393,8 @@ kg_k = pd.read_csv(f"{LOCAL}/kgeur_pca.eigenvec", sep=r"\s+")
 kg_k = kg_k.rename(columns={("#IID" if "#IID" in kg_k.columns else "IID"): "sample"})
 kg_k = kg_k.merge(pd.read_csv(KG_PANEL, sep=r"\s+")[["sample", "pop"]], on="sample", how="left")
 
-mu_k = kg_k[kg_k["pop"].isin(ANCHOR_POPS)][USE].mean().to_numpy()
-sd_k = part_k[USE].std(ddof=1).to_numpy()
-Rk = np.corrcoef(kg_k[kg_k["pop"].isin(ANCHOR_POPS)][USE].to_numpy(), rowvar=False)
-Ck_inv = np.linalg.inv(np.outer(sd_k, sd_k) * ((1 - SHRINK) * Rk + SHRINK * np.eye(K_PCS)))
-dk = part_k[USE].to_numpy() - mu_k
-d_k = np.sqrt(np.einsum("ij,jk,ik->i", dk, Ck_inv, dk))
+mu_k, C_k = mvn(kg_k[kg_k["pop"].isin(ANCHOR_POPS)])
+d_k = distance(part_k, mu_k, C_k)
 keep_kemper = pd.Series(d_k <= np.sort(d_k)[TARGET_N - 1], index=part_k["person_id"]).reindex(
     part["person_id"]).fillna(False).to_numpy()
 
@@ -431,7 +427,7 @@ for ax, (i, j) in zip(axes, PAIRS):
         ax.scatter(s[a], s[b], s=30, marker="x", color="k", zorder=3)
     if i < K_PCS and j < K_PCS:
         gate_ellipse(ax, mu, i, j, THRESHOLD, edgecolor="tab:blue", lw=1.4, zorder=4)
-        gate_ellipse(ax, part[USE].mean().to_numpy(), i, j, np.sort(d_self)[TARGET_N - 1],
+        gate_ellipse(ax, mu_self, i, j, np.sort(d_self)[TARGET_N - 1], cov=C_self,
                      edgecolor="tab:orange", lw=1.4, ls="--", zorder=4)
     ax.set_xlabel(a); ax.set_ylabel(b)
 axes[0].legend(fontsize=8, markerscale=4)
