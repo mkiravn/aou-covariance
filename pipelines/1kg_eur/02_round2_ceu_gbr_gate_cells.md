@@ -8,6 +8,11 @@ direction, PCA fit on the 1000G Europeans with participants projected in.
 Location comes from the reference, scale from the participants (projected
 scores shrink, so the reference spread is not used), size from a target.
 
+The gate is diagonal here, and that is the full multivariate normal model, not
+a simplification: the PCA is fit on these participants, so their scores are
+uncorrelated by construction and `--score` only rescales each PC. Cell 7 checks
+that the off-diagonal correlations really are negligible.
+
 Compute: 16 vCPU, ~100 GB RAM, ~500 GB disk. The PCA fit is the long step.
 
 ---
@@ -273,6 +278,11 @@ USE = PC[:K_PCS]
 anchor = kg[kg["pop"].isin(ANCHOR_POPS)]
 mu = anchor[USE].mean().to_numpy()
 sd = part[USE].std(ddof=1).to_numpy()
+
+# participants are uncorrelated on their own PCs, so a diagonal metric is exact
+off = np.abs(np.corrcoef(part[USE].to_numpy(), rowvar=False) - np.eye(K_PCS)).max()
+print(f"largest off-diagonal correlation among participants on PC1-{K_PCS}: {off:.3f}")
+assert off < 0.05, "participant PCs are correlated; the diagonal metric is not exact here"
 
 
 def distance(frame, centre):
