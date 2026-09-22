@@ -4,12 +4,13 @@ Keeps AoU participants near the centroid of the five 1000G European
 populations in AoU's ancestry PCs. Same gate as the ancestry survey's EUR
 group; this writes it into the sample set's own folder.
 
-**The distance.** Each PC is divided by the SD of the reference founders on
-that PC, then distances are Euclidean over PCs 1–5. So a distance is "how far
-from the European reference centroid, in units of that reference group's own
-spread", i.e. Mahalanobis with a diagonal covariance. Width 1× is the distance
-that holds 99% of the reference founders themselves, so the gate is an
-ellipsoid centred on them, and widths scale that radius.
+**The distance.** Mahalanobis distance to the European reference centroid over
+PCs 1–5, under the reference founders' own covariance: a multivariate normal
+model of that cloud, so the gate follows its shape and orientation rather than
+a sphere. The covariance is shrunk toward a sphere, since a 5×5 covariance from
+a few hundred founders is otherwise noisy enough to stretch the gate along a
+direction that is only sampling error. Width 1× is the distance that holds 99%
+of the reference founders themselves, and wider gates scale that radius.
 
 **No AoU label enters the selection.** From `ancestry_preds.tsv` this notebook
 reads only `research_id` and `pca_features`. The centroid, the SDs and the
@@ -104,8 +105,15 @@ participants within `WIDTH` × that. Inputs here are the PC matrix and the
 
 ```python
 Rg = R[is_eur, :N_PCS]
-mu, sd = Rg.mean(0), Rg.std(0, ddof=1)
-dist = lambda Z: np.sqrt((((Z[:, :N_PCS] - mu) / sd) ** 2).sum(1))
+mu = Rg.mean(0)
+try:
+    from sklearn.covariance import LedoitWolf
+    C = LedoitWolf().fit(Rg).covariance_
+except ImportError:                      # same shrinkage target, fixed weight
+    S_ = np.cov(Rg, rowvar=False)
+    C = 0.9 * S_ + 0.1 * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
+Cinv = np.linalg.inv(C)
+dist = lambda Z: np.sqrt(np.einsum("ij,jk,ik->i", Z[:, :N_PCS] - mu, Cinv, Z[:, :N_PCS] - mu))
 d_aou, d_ref = dist(X), dist(Rg)
 d99 = np.quantile(d_ref, 0.99)
 
@@ -117,7 +125,7 @@ with open(f"{OUT}/round1_provenance.txt", "w") as f:
     f.write(f"reference\t1000G {', '.join(EUR_POPS)} founders in training_pca.tsv (n={int(is_eur.sum())})\n"
             f"labels\t{KG_LABELS_URL}\n"
             f"pcs\t1-{N_PCS} of ancestry_preds.tsv pca_features\n"
-            f"distance\tEuclidean over PCs 1-{N_PCS}, each scaled by the reference SD on that PC\n"
+            f"distance\tMahalanobis over PCs 1-{N_PCS}, shrunk reference covariance\n"
             f"selection\tPC coordinates and 1000G labels only; no AoU label\n"
             f"width\t{WIDTH:g}x the distance holding 99% of the reference founders\n"
             f"threshold\t{WIDTH * d99:.6f}\nkept\t{int(keep.sum())}\n")
@@ -154,8 +162,11 @@ for ax, (i, j) in zip(axes, [(0, 1), (2, 3)]):
         ax.scatter(R[m, i], R[m, j], s=16, marker="x", color=cols[pop], label=pop, zorder=1)
     ax.scatter(X[shown, i], X[shown, j], s=2, alpha=0.3, color="tab:blue", rasterized=True, zorder=2)
     r = WIDTH * d99
-    ax.add_patch(Ellipse((mu[i], mu[j]), 2 * r * sd[i], 2 * r * sd[j], fill=False,
-                         edgecolor="tab:blue", lw=1.4, zorder=3))
+    M = C[np.ix_([i, j], [i, j])]              # the ellipsoid's shadow on these two PCs
+    vals, vecs = np.linalg.eigh(M)
+    ax.add_patch(Ellipse((mu[i], mu[j]), 2 * r * np.sqrt(vals[-1]), 2 * r * np.sqrt(vals[0]),
+                         angle=np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1])),
+                         fill=False, edgecolor="tab:blue", lw=1.4, zorder=3))
     pts = np.r_[X[shown][:, [i, j]], R[is_eur][:, [i, j]]]
     pad = 0.2 * np.ptp(pts, axis=0)
     ax.set_xlim(pts[:, 0].min() - pad[0], pts[:, 0].max() + pad[0])

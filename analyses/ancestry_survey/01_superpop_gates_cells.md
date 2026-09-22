@@ -127,20 +127,40 @@ def gate_rows(pops):
 
 ## Cell 3 — gates
 
-Distance to each group's centroid, scaled by the group's own spread. Saves the
-participant list of every gate at every width.
+Mahalanobis distance to each group's centroid under the group's own covariance:
+a multivariate normal model of the reference samples, so the gate follows the
+shape of the cloud rather than a sphere. Saves the participant list of every
+gate at every width.
 
 - `growth`: rise in count from 1× to the widest gate; near 1 for a cluster, large for a continuum
 - `spread`: dispersion of the selected participants relative to the reference
 
 ```python
+def metric_cov(Rg):
+    """The group's covariance, shrunk toward a sphere. Shrinkage matters: a 5x5
+    covariance from a few dozen founders is otherwise noisy enough to stretch
+    the gate along a direction that is only sampling error."""
+    try:
+        from sklearn.covariance import LedoitWolf
+        return LedoitWolf().fit(Rg).covariance_
+    except ImportError:                       # same target, fixed weight
+        S_ = np.cov(Rg, rowvar=False)
+        lam = 0.1
+        return (1 - lam) * S_ + lam * np.trace(S_) / S_.shape[0] * np.eye(S_.shape[0])
+
+
+def mahalanobis(Z, mu, C):
+    d = Z[:, :N_PCS] - mu
+    return np.sqrt(np.einsum("ij,jk,ik->i", d, np.linalg.inv(C), d))
+
+
 dist, d99, kept, centre = {}, {}, {}, {}
 for g, pops in GATES.items():
     Rg = R[gate_rows(pops), :N_PCS]
-    mu, sd = Rg.mean(0), Rg.std(0, ddof=1)
-    centre[g] = (mu, sd)
-    dist[g] = np.sqrt((((X[:, :N_PCS] - mu) / sd) ** 2).sum(1))
-    d99[g] = np.quantile(np.sqrt((((Rg - mu) / sd) ** 2).sum(1)), 0.99)
+    mu, C = Rg.mean(0), metric_cov(Rg)
+    centre[g] = (mu, C)
+    dist[g] = mahalanobis(X, mu, C)
+    d99[g] = np.quantile(mahalanobis(Rg, mu, C), 0.99)
     for w in WIDTHS:
         kept[(g, w)] = dist[g] <= w * d99[g]
         aou.loc[kept[(g, w)], "person_id"].to_csv(
@@ -149,10 +169,10 @@ for g, pops in GATES.items():
 rows = []
 for g, pops in GATES.items():
     Rg = R[gate_rows(pops), :N_PCS]
-    mu, sd = centre[g]
+    mu, C = centre[g]
     k1 = kept[(g, 1.0)]
-    spread = (X[k1, :N_PCS].std(0, ddof=1) / sd).max() if k1.sum() > 1 else np.nan
-    ref_d = np.sqrt((((Rg - mu) / sd) ** 2).sum(1))
+    spread = (X[k1, :N_PCS].std(0, ddof=1) / np.sqrt(np.diag(C))).max() if k1.sum() > 1 else np.nan
+    ref_d = mahalanobis(Rg, mu, C)
     rows.append({"gate": g, "ref_n": len(Rg),
                  "ref_in_narrow": (ref_d <= W_NARROW * d99[g]).mean(),
                  **{f"n_{w:g}x": int(kept[(g, w)].sum()) for w in WIDTHS},
@@ -190,10 +210,15 @@ rng = np.random.default_rng(0)
 
 
 def gate_ellipse(ax, g, i, j, width, **kw):
-    """Outline of gate g at `width` on PCs i, j."""
-    mu, sd = centre[g]
+    """Outline of the gate on PCs i, j: the shadow of the ellipsoid, which is set
+    by the 2x2 marginal covariance, so a full metric tilts it."""
+    mu, C = centre[g]
     r = width * d99[g]
-    ax.add_patch(Ellipse((mu[i], mu[j]), 2 * r * sd[i], 2 * r * sd[j], fill=False, **kw))
+    M = C[np.ix_([i, j], [i, j])]
+    vals, vecs = np.linalg.eigh(M)
+    angle = np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1]))
+    ax.add_patch(Ellipse((mu[i], mu[j]), 2 * r * np.sqrt(vals[-1]), 2 * r * np.sqrt(vals[0]),
+                         angle=angle, fill=False, **kw))
 
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 7))
@@ -240,8 +265,8 @@ for g, pops in GATES.items():
     fig, axes = plt.subplots(1, len(PC_PAIRS), figsize=(15, 6.5))
     for ax, (i, j) in zip(axes, PC_PAIRS):
         if ZOOM:
-            mu, sd = centre[g]
-            half = W_WIDE * d99[g] * sd[[i, j]]
+            mu, C = centre[g]
+            half = W_WIDE * d99[g] * np.sqrt(np.diag(C[np.ix_([i, j], [i, j])]))
             pts = np.r_[X[in_narrow | in_wide][:, [i, j]], R[r][:, [i, j]],
                         [mu[[i, j]] - half, mu[[i, j]] + half]]
             lo, hi = pts.min(0), pts.max(0)
@@ -291,14 +316,19 @@ the gate centroid, in reference SDs. `inside` checks the ellipses (should be 1).
 W_REPORT = 1.0
 PCS = [f"PC{k + 1}" for k in range(N_PCS)]
 for g, pops in GATES.items():
-    mu, sd = centre[g]
+    mu, C = centre[g]
+    sd = np.sqrt(np.diag(C))
     m = kept[(g, W_REPORT)]
     rows = {f"{p} (founders)": (R[gate_rows([p]), :N_PCS].mean(0) - mu) / sd for p in pops}
     if m.sum() > 20:
         rows[f"AoU inside {W_REPORT:g}×"] = (X[m, :N_PCS].mean(0) - mu) / sd
-    inside = {f"PC{i + 1}/PC{j + 1}": round(float(
-                  ((((X[m][:, [i, j]] - mu[[i, j]]) / (W_REPORT * d99[g] * sd[[i, j]])) ** 2).sum(1) <= 1).mean()), 3)
-              for i, j in PC_PAIRS} if m.any() else {}
+    inside = {}
+    if m.any():
+        for i, j in PC_PAIRS:
+            y = X[m][:, [i, j]] - mu[[i, j]]
+            Minv = np.linalg.inv(C[np.ix_([i, j], [i, j])])
+            d2 = np.einsum("ij,jk,ik->i", y, Minv, y)
+            inside[f"PC{i + 1}/PC{j + 1}"] = round(float((d2 <= (W_REPORT * d99[g]) ** 2).mean()), 3)
     print(f"\n{g}  n inside {W_REPORT:g}× = {show(int(m.sum()))}   inside: {inside}")
     print(pd.DataFrame(rows, index=PCS).T.round(2).to_string())
 ```
@@ -306,19 +336,23 @@ for g, pops in GATES.items():
 ## Cell 4e — why the drawn ellipse is not the gate
 
 The gate uses PCs 1–5; the ellipse is its outline on two of them. Participants
-inside the ellipse are coloured by their distance on the other PCs, in units of
-the gate limit: above 1 they are excluded whatever this panel shows.
+inside the ellipse are coloured by what the remaining PCs add to their distance,
+given these two, in units of the gate limit. Above 1 they are excluded whatever
+this panel shows.
 
 ```python
 G = "NAT"                 # gate to inspect
 I, J = 0, 1               # PCs on the axes
 W_SHOW = W_WIDE
 
-mu, sd = centre[G]
-z = (X[:, :N_PCS] - mu) / sd
-others = [k for k in range(N_PCS) if k not in (I, J)]
-d_plane = np.sqrt((z[:, [I, J]] ** 2).sum(1))
-d_other = np.sqrt((z[:, others] ** 2).sum(1))
+# Under the MVN, the squared distance splits exactly into what these two PCs
+# show (the marginal term, which is what the drawn ellipse bounds) and what the
+# other PCs add given them (the conditional term).
+mu, C = centre[G]
+d = X[:, :N_PCS] - mu
+M = C[np.ix_([I, J], [I, J])]
+d_plane = np.sqrt(np.einsum("ij,jk,ik->i", d[:, [I, J]], np.linalg.inv(M), d[:, [I, J]]))
+d_other = np.sqrt(np.maximum(dist[G] ** 2 - d_plane ** 2, 0))
 lim = W_SHOW * d99[G]
 inside_ellipse = d_plane <= lim
 passes = inside_ellipse & (dist[G] <= lim)
@@ -327,8 +361,10 @@ print(f"{G}: inside the {W_SHOW:g}× ellipse on PC{I + 1}/PC{J + 1}: {show(int(i
       f"of those, in the gate: {show(int(passes.sum()))}")
 excluded = inside_ellipse & ~passes
 if excluded.sum() > 20:
-    print("mean |z| per PC among those excluded:",
-          dict(zip([f"PC{k + 1}" for k in range(N_PCS)], np.abs(z[excluded]).mean(0).round(2))))
+    sd = np.sqrt(np.diag(C))
+    print("mean |PC - centroid| in reference SDs among those excluded:",
+          dict(zip([f"PC{k + 1}" for k in range(N_PCS)],
+                   np.abs(d[excluded] / sd).mean(0).round(2))))
 
 fig, ax = plt.subplots(figsize=(8.5, 7.5))
 ax.hist2d(X[:, I], X[:, J], bins=300, cmap="Greys", norm=LogNorm(), zorder=0)
@@ -341,7 +377,7 @@ pad = 0.1 * np.ptp(pts, axis=0)
 ax.set_xlim(pts[:, 0].min() - pad[0], pts[:, 0].max() + pad[0])
 ax.set_ylim(pts[:, 1].min() - pad[1], pts[:, 1].max() + pad[1])
 ax.set_xlabel(f"PC{I + 1}"); ax.set_ylabel(f"PC{J + 1}")
-fig.colorbar(sc, ax=ax, label=f"distance on PCs {others} (× gate limit); >1 excluded")
+fig.colorbar(sc, ax=ax, label="what the other PCs add, given these two (× gate limit); >1 excluded")
 ax.set_title(f"{G}: participants inside the {W_SHOW:g}× ellipse on these two PCs")
 plt.tight_layout()
 plt.savefig(f"{OUT}/gate_{G}_other_pcs.png", dpi=130, bbox_inches="tight")
