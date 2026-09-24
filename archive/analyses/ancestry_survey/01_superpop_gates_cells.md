@@ -35,7 +35,7 @@ REL_PATH       = f"{AUX}/relatedness/samples_relatedness.tsv"
 REL_COLS       = ("i.s", "j.s", "kin")     # participant 1, participant 2, kinship coefficient
 
 WS = os.path.expanduser("~/workspace/Data from All of Us Controlled Tier /shared-env-pilot")
-OUT = f"{WS}/phenotypic_covariance_v9/analyses/ancestry_survey"
+OUT = f"{WS}/phenotypic_covariance_v9/analyses/ancestry_filtering"
 KEEP_DIR = f"{OUT}/keep"
 os.makedirs(KEEP_DIR, exist_ok=True)
 
