@@ -1,0 +1,258 @@
+library(dplyr)
+
+# Rank-based inverse-normal transform. Chosen over log/Box-Cox since it
+# doesn't assume a particular skew direction or require positive values.
+inverse_normal_transform <- function(x) {
+  r <- rank(x, na.last = "keep", ties.method = "average")
+  n <- sum(!is.na(x))
+  qnorm((r - 0.5) / n)
+}
+
+add_transformed_variant <- function(df, pheno_col) {
+  df[[paste0(pheno_col, "__invnorm")]] <- inverse_normal_transform(df[[pheno_col]])
+  df
+}
+
+skew_summary <- function(x, label) {
+  tibble(variant = label, n = sum(!is.na(x)), skewness = e1071::skewness(x, na.rm = TRUE))
+}
+
+# Physiologically-plausible range filter -- catches clear data-entry/unit
+# errors (e.g. a height of 900cm) before any modeling or transform. Bounds
+# are deliberately generous -- wide enough to keep true biological extremes,
+# not clinical "normal" ranges (a disease-range value is real data, not an
+# error). Complementary to, not a replacement for, residualize_phenotype()'s
+# post-residual 5-SD trim (Kemper et al. 2021 Methods): that trim only
+# catches values extreme relative to the *fitted model*, computed separately
+# per covariate-set, so a wrong-but-plausible-looking value can slip through
+# it, or get judged differently depending on which covariates happened to be
+# included. This runs once, up front, independent of any model.
+filter_plausible_range <- function(df, pheno_col, plausible_min, plausible_max) {
+  x <- df[[pheno_col]]
+  in_range <- !is.na(x) & x >= plausible_min & x <= plausible_max
+  list(
+    data = df[in_range, ],
+    n_input = nrow(df),
+    n_excluded = sum(!in_range)
+  )
+}
+
+# Named list of covariate-set formula RHS vectors -- a nested staircase, each
+# adding one more block on top of the last (base -> +PCs -> +zip3 -> +SES),
+# not independently-toggled combinations. sex_at_birth is handled separately
+# (the stratification variable for step 3, not a residualization covariate --
+# see residualize_phenotype()), so it isn't in these formulas. run_residualization()
+# crosses every entry here with {raw, invnorm} automatically.
+build_covariate_sets <- function(pc_cols) {
+  list(
+    base              = c("age"),
+    base_pcs          = c("age", pc_cols),
+    base_pcs_zip3     = c("age", pc_cols, "zip3"),
+    base_pcs_zip3_ses = c("age", pc_cols, "zip3", "median_income", "poverty", "deprivation_index")
+  )
+}
+
+# Protocol (order matters, see Kemper et al. 2021 Methods):
+#   1. residualize phenotype ~ covariates
+#   2. trim residuals > outlier_sd SD from the mean
+#   3. standardize surviving residuals to mean 0, variance 1, within each sex
+residualize_phenotype <- function(df, pheno_col, sex_col, covariate_cols, outlier_sd = 5) {
+  formula <- as.formula(paste(pheno_col, "~", paste(covariate_cols, collapse = " + ")))
+  fit <- lm(formula, data = df, na.action = na.exclude)
+  df$.residual <- residuals(fit)
+
+  keep <- !is.na(df$.residual)
+  m <- mean(df$.residual[keep])
+  s <- sd(df$.residual[keep])
+  not_outlier <- keep & abs(df$.residual - m) <= outlier_sd * s
+
+  df$phenotype_norm <- NA_real_
+  for (s_level in unique(df[[sex_col]][not_outlier])) {
+    idx <- not_outlier & df[[sex_col]] == s_level
+    r <- df$.residual[idx]
+    df$phenotype_norm[idx] <- (r - mean(r)) / sd(r)
+  }
+
+  list(
+    data = df %>% select(-.residual),
+    n_input = nrow(df),
+    n_retained = sum(!is.na(df$phenotype_norm)),
+    r_squared = summary(fit)$r.squared
+  )
+}
+
+# Matches GRM-pairs/full_grm_bin/prep_pheno.R's expected input format.
+write_grm_pheno <- function(df, file) {
+  out <- df %>%
+    filter(!is.na(phenotype_norm)) %>%
+    transmute(FID = person_id, IID = person_id, Y = phenotype_norm)
+  write.table(out, file = file, quote = FALSE, sep = " ",
+              row.names = FALSE, col.names = TRUE, na = "NA")
+}
+
+# Pulls each phenotype, applies the plausible-range filter, joins covariates,
+# adds the invnorm variant, and writes one neat TSV per phenotype to
+# table_dir (<phenotype_name>.tsv: person_id, phenotype, phenotype__invnorm,
+# age, sex_at_birth, plus whatever pull_covariates() returns -- PCs, zip3,
+# SES). This is the only step that hits BigQuery / calls pull_phenotype() /
+# pull_covariates(); table_dir is meant to live in the workspace bucket
+# (data/02_phenotype/modeling_tables/, see root README's bucket layout) so
+# tuning the residualization procedure itself -- covariate-set formulas,
+# outlier_sd, which variant -- via run_residualization_from_tables() never
+# needs to re-pull anything.
+prepare_modeling_tables <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates, table_dir) {
+  stopifnot(all(c("plausible_min", "plausible_max") %in% names(pheno_list)))
+  dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+
+  range_diagnostics <- list()
+
+  for (i in seq_len(nrow(pheno_list))) {
+    row <- pheno_list[i, ]
+    name <- row$phenotype_name
+
+    # a bad row (wrong/unimplemented source, a concept_id that doesn't
+    # actually exist in this CDR version, a transient BigQuery error, ...)
+    # shouldn't take the whole run down with it -- print why and move on to
+    # the next phenotype. pull_covariates() is deliberately NOT wrapped this
+    # way: it's the same call for every phenotype, so a failure there is
+    # systemic, not phenotype-specific, and should stop the run loudly
+    # rather than silently produce N empty phenotypes.
+    pheno_df <- tryCatch(
+      pull_phenotype(row, keep_ids),
+      error = function(e) {
+        message(sprintf("Skipping '%s': pull_phenotype() failed -- %s", name, conditionMessage(e)))
+        NULL
+      }
+    )
+    if (is.null(pheno_df)) {
+      range_diagnostics[[name]] <- tibble(
+        phenotype = name, n_input = NA_integer_,
+        n_excluded_implausible = NA_integer_, n_after_range_filter = NA_integer_,
+        n_after_keep_list = NA_integer_,
+        status = "skipped: pull_phenotype() failed"
+      )
+      next
+    }
+
+    range_result <- filter_plausible_range(
+      pheno_df, "phenotype", as.numeric(row$plausible_min), as.numeric(row$plausible_max)
+    )
+    pheno_df <- range_result$data
+
+    # restrict to the ancestry-filtered analysis cohort BEFORE writing anything out --
+    # the covariate joins below are left_join()s (pheno_df is the left side), so without
+    # this, everyone outside keep_ids would still survive into table_dir's persisted TSV
+    # (just with NA covariates), and into the "base" covariate-set's exported .pheno file
+    # specifically, since its only covariate (age) is populated for the unrestricted
+    # population too and lm() only drops rows missing a *required* covariate
+    n_before_keep_list <- nrow(pheno_df)
+    pheno_df <- pheno_df %>% filter(person_id %in% keep_ids)
+
+    range_diagnostics[[name]] <- tibble(
+      phenotype = name, n_input = range_result$n_input,
+      n_excluded_implausible = range_result$n_excluded,
+      n_after_range_filter = n_before_keep_list,
+      n_after_keep_list = nrow(pheno_df),
+      status = "ok"
+    )
+
+    covars <- pull_covariates(keep_ids)
+
+    df <- pheno_df %>%
+      left_join(covars$pcs, by = "person_id") %>%
+      left_join(covars$zip3, by = "person_id") %>%
+      left_join(covars$ses, by = "person_id") %>%
+      add_transformed_variant("phenotype")
+
+    write_tsv(df, file.path(table_dir, paste0(name, ".tsv")))
+  }
+
+  list(range_summary_table = bind_rows(range_diagnostics))
+}
+
+# Reads each phenotype's prepared table (prepare_modeling_tables()'s output)
+# and runs the {raw, invnorm} x covariate-set cross product, writing one
+# .pheno file per combination -- no BigQuery access needed, so this is cheap
+# to rerun on its own while iterating on covariate_sets / outlier_sd / which
+# phenotypes to include.
+run_residualization_from_tables <- function(pheno_list, table_dir, covariate_sets, out_dir) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  skew_diagnostics <- list()
+  combo_diagnostics <- list()
+
+  for (name in pheno_list$phenotype_name) {
+    table_path <- file.path(table_dir, paste0(name, ".tsv"))
+    if (!file.exists(table_path)) {
+      # prepare_modeling_tables() skipped this phenotype (bad row, failed
+      # pull) -- no table to read, so skip the whole {raw, invnorm} x
+      # covariate-set cross product for it rather than erroring on a
+      # missing file
+      message(sprintf("Skipping '%s': no modeling table at %s (prepare_modeling_tables() likely skipped it)", name, table_path))
+      combo_diagnostics[[name]] <- tibble(
+        combo = name, phenotype = name, variant = NA_character_, covariate_set = NA_character_,
+        n_input = NA_integer_, n_retained = NA_integer_, r_squared = NA_real_,
+        status = "skipped: no modeling table found"
+      )
+      next
+    }
+    df <- read_tsv(table_path, show_col_types = FALSE)
+
+    skew_diagnostics[[paste0(name, "__raw")]] <-
+      skew_summary(df$phenotype, "raw") %>% mutate(phenotype = name, .before = 1)
+    skew_diagnostics[[paste0(name, "__invnorm")]] <-
+      skew_summary(df[["phenotype__invnorm"]], "invnorm") %>% mutate(phenotype = name, .before = 1)
+
+    for (variant_col in c("phenotype", "phenotype__invnorm")) {
+      variant_label <- ifelse(variant_col == "phenotype", "raw", "invnorm")
+
+      for (covset_name in names(covariate_sets)) {
+        covariate_cols <- covariate_sets[[covset_name]]
+        out_name <- sprintf("%s__%s__%s", name, variant_label, covset_name)
+
+        # a covariate column that's entirely NA (e.g. zip3/ses not yet wired
+        # up in pull_covariates()) leaves lm() with 0 complete cases -- skip
+        # that combo instead of crashing the whole run
+        all_na_cols <- covariate_cols[sapply(covariate_cols, function(col) all(is.na(df[[col]])))]
+        if (length(all_na_cols) > 0) {
+          combo_diagnostics[[out_name]] <- tibble(
+            combo = out_name, phenotype = name, variant = variant_label,
+            covariate_set = covset_name,
+            n_input = nrow(df), n_retained = NA_integer_, r_squared = NA_real_,
+            status = sprintf("skipped: all-NA covariate(s) %s", paste(all_na_cols, collapse = ", "))
+          )
+          next
+        }
+
+        result <- residualize_phenotype(df, variant_col, "sex_at_birth", covariate_cols)
+        write_grm_pheno(result$data, file.path(out_dir, paste0(out_name, ".pheno")))
+
+        combo_diagnostics[[out_name]] <- tibble(
+          combo = out_name, phenotype = name, variant = variant_label,
+          covariate_set = covset_name,
+          n_input = result$n_input, n_retained = result$n_retained,
+          r_squared = result$r_squared, status = "ok"
+        )
+      }
+    }
+  }
+
+  list(
+    skew_summary_table = bind_rows(skew_diagnostics),
+    combo_summary_table = bind_rows(combo_diagnostics)
+  )
+}
+
+# Convenience wrapper for callers that don't care about the two-stage split --
+# same behavior/return shape (range_summary_table, skew_summary_table,
+# combo_summary_table) as before prepare_modeling_tables()/
+# run_residualization_from_tables() were split apart. `pull_phenotype(row,
+# keep_ids)` and `pull_covariates(keep_ids)` are supplied by the caller --
+# real AoU pulls in the remote notebook, synthetic generators in the local
+# fake-data test.
+run_residualization <- function(pheno_list, keep_ids, pull_phenotype, pull_covariates,
+                                 covariate_sets, out_dir, table_dir = tempfile("modeling_tables_")) {
+  prep <- prepare_modeling_tables(pheno_list, keep_ids, pull_phenotype, pull_covariates, table_dir)
+  rest <- run_residualization_from_tables(pheno_list, table_dir, covariate_sets, out_dir)
+  c(list(range_summary_table = prep$range_summary_table), rest)
+}
