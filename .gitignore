@@ -58,3 +58,6 @@ __pycache__/
 # Temporary
 *.tmp
 *.gstmp
+
+# built by src/Makefile
+src/grm_class_tool
