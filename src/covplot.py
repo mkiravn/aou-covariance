@@ -51,7 +51,14 @@ FONT_STACK = ["Helvetica Neue", "Helvetica", "Liberation Sans", "Nimbus Sans",
               "Arial", "DejaVu Sans"]
 
 # y is the standardised residual written by 05_phenotype_residualize.ipynb
-YLABEL = r"$\mathrm{E}[\tilde{y}_i\,\tilde{y}_j]$"
+# Spelled out, not just the symbol: on a slide the axis is read before the
+# caption, and "E[y~i y~j]" alone does not say what quantity it is.
+YLABEL = r"Phenotypic cross-product ($\tilde{y}_i\,\tilde{y}_j$)"
+XLABEL = r"Genetic relatedness ($a_{ij}$)"
+# `other` is drawn in ink rather than its class hue: it is the dense bulk of
+# the data, and the fits have to read ON TOP of it. Hue is then carried only by
+# the two classes that are actually being contrasted, and by the fit lines.
+POINT_COL = dict(CLASS_COL, other=INK)
 
 CATEGORY = {
     **dict.fromkeys(["height", "weight", "bmi", "waist_circumference",
