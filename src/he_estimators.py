@@ -46,6 +46,8 @@ and an intercept per band, each band's slope comes only from variation in a
 within that band. Differences are computed inside each jackknife replicate, so
 their SEs carry the covariance of the two terms.
 """
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -54,6 +56,12 @@ NOPO = ["other", "FS"]
 POOLED = ["other", "FS", "PO"]
 
 U_HI, T_HI, R_HI = 0.02, 0.05, 0.7
+# The first-degree and half-sib windows the FS-range estimators are fitted on.
+# Named here because 10_crossproduct_diagnostics.ipynb fits the same windows and
+# had them as literals: two copies of "the FS range" is one copy too many.
+FS_RANGE = (0.4, 0.6)
+HS_RANGE = (0.2, 0.4)
+STEP_RANGE = (HS_RANGE[0], FS_RANGE[1])     # both windows, one common slope
 # Relatedness bands for the offset models, ascending. The edges are KING's
 # kinship cutoffs (0.0884 / 0.177 / 0.354) doubled and rounded to bin edges,
 # but they are labelled band1..band3 rather than by degree: the band is a range
@@ -72,11 +80,34 @@ def load_grid(bins_path):
     return np.loadtxt(bins_path).mean(axis=1)
 
 
+def blocks_in(jk_path):
+    """Number of delete-block replicates in a merged `.jk.tsv`.
+
+    The block count is a property of how `08_accumulate.ipynb` merged the run,
+    so read it off the file rather than restating it as a literal.
+    """
+    b = pd.read_csv(jk_path, sep="\t", usecols=["block"])["block"]
+    lo, hi, k = int(b.min()), int(b.max()), b.nunique()
+    assert lo == 0, f"{jk_path}: block ids start at {lo}, expected 0"
+    assert k == hi + 1, (f"{jk_path}: block ids run 0-{hi} but only {k} are "
+                         f"present -- the merge dropped a block")
+    return hi + 1
+
+
 def load_arrays(full_path, jk_path, nbins, nblocks):
     """Bin sums S and pair counts N, shape (1 + nblocks, len(CLS), nbins).
     Replicate 0 is the full data; replicate b+1 omits jackknife block b."""
     f = pd.read_csv(full_path, sep="\t")
     j = pd.read_csv(jk_path, sep="\t")
+    # A wrong `nblocks` fails quietly in both directions: too small and
+    # load_arrays would index past the end of S, too large and the surplus
+    # replicates stay all-zero, which makes every jackknife SE in the run NaN
+    # without anything else looking wrong. Check it here, once.
+    n_file = blocks_in(jk_path)
+    assert n_file == nblocks, (
+        f"{os.path.basename(jk_path)} holds {n_file} jackknife blocks, not "
+        f"{nblocks} -- set NBLOCKS to what 08_accumulate.ipynb merged with, or "
+        f"pass blocks_in(jk_path)")
     S = np.zeros((1 + nblocks, len(CLS), nbins))
     N = np.zeros_like(S)
     for ci, c in enumerate(CLS):
@@ -141,7 +172,7 @@ def estimates(S, N, r, mid):
 
     origin = lambda a: a[:, None]
     slope_int = lambda a: np.c_[a, np.ones_like(a)]
-    step = lambda a: np.c_[a, _ind(a, .4, .6), _ind(a, .2, .4)]
+    step = lambda a: np.c_[a, _ind(a, *FS_RANGE), _ind(a, *HS_RANGE)]
     offsets = _band_ind
     slopes_offsets = _band_slope_ind
     unrel = (-np.inf, U_HI)
@@ -157,9 +188,9 @@ def estimates(S, N, r, mid):
 
     for label, classes in (("noPO", NOPO), ("PO", ["PO"])):
         # classic sib regression -- slope conflates h2 and shared environment
-        fit(label, classes, [(0.4, 0.6)], origin, {"h2_FS": lambda b: b[0]})
+        fit(label, classes, [FS_RANGE], origin, {"h2_FS": lambda b: b[0]})
         # shared environment among first-degree pairs
-        fit(label, classes, [(0.4, 0.6)], lambda a: np.c_[a, np.ones_like(a)],
+        fit(label, classes, [FS_RANGE], lambda a: np.c_[a, np.ones_like(a)],
             {"b2_FS": lambda b: 2 * b[1], "b2_FS.slope": lambda b: b[0]})
 
     band_readouts = lambda model, first, tag="int": {
@@ -167,10 +198,10 @@ def estimates(S, N, r, mid):
         for j, d in enumerate(OFFSET_BANDS)}
     for label, classes in (("noPO", NOPO),):
         # quadratic absorbs non-linearity (Wainschtein et al. 2025)
-        fit(label, classes, [(0.05, 0.7)], lambda a: np.c_[a, a ** 2],
+        fit(label, classes, [(T_HI, R_HI)], lambda a: np.c_[a, a ** 2],
             {"h2_PedW25": lambda b: b[0], "PedW25.quad": lambda b: b[1]})
         # separate FS (0.4-0.6) and HS (0.2-0.4) intercepts, common slope
-        fit(label, classes, [(0.2, 0.6)], step,
+        fit(label, classes, [STEP_RANGE], step,
             {"b2_step": lambda b: 4 * (b[1] - b[2]),
              "b2_step_ratio": lambda b: b[1] / b[2] if b[2] != 0 else np.nan})
 
@@ -198,7 +229,7 @@ def estimates(S, N, r, mid):
     # mean cross-product above the additive prediction h2_Unrel * a_ij
     h2u = out[("h2_Unrel", "noPO")]
     for cls in ("FS", "PO"):
-        a, m, n = bins([cls], (0.4, 0.6))
+        a, m, n = bins([cls], FS_RANGE)
         out[("excess", cls)] = (np.sum(n * (m - h2u * a)) / np.sum(n)
                                 if len(a) and np.isfinite(h2u) else np.nan)
         out[("n_pairs", cls)] = float(np.sum(n))
