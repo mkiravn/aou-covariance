@@ -159,6 +159,32 @@ def estimates(S, N, r, mid):
     return out
 
 
+def bin_curve(S, N, classes, mid, nblocks):
+    """Per-bin pair-weighted mean and delete-block jackknife SE for a class set.
+
+    Returns (mid, mean, n, se) over the bins the class set populates, with no
+    display filtering -- callers decide what to show. Sums the class sums before
+    dividing, so a set like NOPO is a pair-weighted mean rather than a mean of
+    means, and recomputes the SE from the replicates rather than combining the
+    per-class ones. `se` is NaN for a bin some replicate did not populate.
+    """
+    ci = [CLS.index(c) for c in classes]
+    s0, n0 = S[0, ci].sum(0), N[0, ci].sum(0)
+
+    sr, nr = S[1:, ci].sum(1), N[1:, ci].sum(1)
+    ok = nr > 0
+    reps = np.divide(sr, nr, out=np.zeros_like(sr, dtype=float), where=ok)
+    cnt = ok.sum(axis=0)
+    rep_mean = np.divide(np.where(ok, reps, 0.0).sum(axis=0), cnt,
+                         out=np.zeros(len(mid)), where=cnt > 0)
+    centred = np.where(ok, reps - rep_mean, 0.0)
+    se = np.sqrt((nblocks - 1) / nblocks * (centred ** 2).sum(axis=0))
+    se = np.where(cnt == nblocks, se, np.nan)
+
+    k = n0 > 0
+    return mid[k], s0[k] / n0[k], n0[k], se[k]
+
+
 def _offsets(a):
     return np.column_stack([_ind(a, lo, hi) for lo, hi in DEG_BANDS.values()])
 
