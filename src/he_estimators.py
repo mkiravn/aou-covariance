@@ -46,6 +46,7 @@ and an intercept per band, each band's slope comes only from variation in a
 within that band. Differences are computed inside each jackknife replicate, so
 their SEs carry the covariance of the two terms.
 """
+import math
 import os
 
 import numpy as np
@@ -78,6 +79,72 @@ DEG_BANDS, DEG_LO = OFFSET_BANDS, BAND_LO   # old names, for archived notebooks
 def load_grid(bins_path):
     """Bin midpoints, in bin_index order (bin_index - 1)."""
     return np.loadtxt(bins_path).mean(axis=1)
+
+
+# ── Student-t critical values ─────────────────────────────────────────────────
+# The SEs below are delete-block jackknife SEs, so an interval around them is a
+# t interval on `nblocks - 1` df, not a normal one: 1.96 understates the width
+# (t(.975, 49) = 2.010, t(.975, 19) = 2.093). Implemented here rather than taken
+# from scipy, which the module deliberately does not depend on -- the regularized
+# incomplete beta is a continued fraction (Numerical Recipes 6.4) and the
+# quantile is a bisection on the resulting CDF, checked against R's qt() in
+# test/test_he_estimators.py.
+CI_LEVEL = 0.95
+
+
+def _betacf(a, b, x, itmax=200, eps=3e-16):
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > 1e-300 else 1e-300)
+    h = d
+    for m in range(1, itmax + 1):
+        m2 = 2 * m
+        for num in (m * (b - m) * x / ((qam + m2) * (a + m2)),
+                    -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))):
+            d = 1.0 + num * d
+            d = 1.0 / (d if abs(d) > 1e-300 else 1e-300)
+            c = 1.0 + num / (c if abs(c) > 1e-300 else 1e-300)
+            h *= d * c
+        if abs(d * c - 1.0) < eps:
+            return h
+    raise RuntimeError(f"betacf did not converge for a={a}, b={b}, x={x}")
+
+
+def _betainc(a, b, x):
+    """Regularized incomplete beta I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    lbt = (math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+           + a * math.log(x) + b * math.log1p(-x))
+    bt = math.exp(lbt)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def t_cdf(t, df):
+    """P(T <= t) for Student's t on `df` degrees of freedom."""
+    if df <= 0:
+        return np.nan
+    tail = 0.5 * _betainc(0.5 * df, 0.5, df / (df + t * t))
+    return 1.0 - tail if t > 0 else tail
+
+
+def t_crit(df, level=CI_LEVEL):
+    """Two-sided critical value: t such that P(|T| <= t) == level."""
+    if not df or df <= 0 or not np.isfinite(df):
+        return np.nan
+    target = 0.5 * (1.0 + level)
+    lo, hi = 0.0, 1e3
+    for _ in range(200):                     # bisection; the CDF is monotone
+        mid_t = 0.5 * (lo + hi)
+        if t_cdf(mid_t, df) < target:
+            lo = mid_t
+        else:
+            hi = mid_t
+    return 0.5 * (lo + hi)
 
 
 def blocks_in(jk_path):
@@ -379,11 +446,20 @@ def compare_models(S, N, mid, nblocks, classes=NOPO):
     return pd.DataFrame(fit_rows), pd.DataFrame(contrast_rows)
 
 
-def jackknife(S, N, mid, nblocks):
-    """Point estimates on the full data with delete-block jackknife SEs.
-    SE is NaN unless every block's replicate produced a finite estimate."""
+def jackknife(S, N, mid, nblocks, level=CI_LEVEL):
+    """Point estimates on the full data with delete-block jackknife SEs and a
+    two-sided t interval on `nblocks - 1` df.
+
+    SE is NaN unless every block's replicate produced a finite estimate, and the
+    interval is NaN with it. The interval is `est +/- t(level, nblocks-1) * se`:
+    the SE is estimated from `nblocks` replicates, so the multiplier is t, not
+    1.96 -- at 50 blocks that is 2.010, 2.6% wider, and at 20 blocks 2.093.
+
+    `n_pairs` is a count, not an estimate; it has no SE and gets no interval.
+    """
     full = estimates(S, N, 0, mid)
     reps = [estimates(S, N, r, mid) for r in range(1, nblocks + 1)]
+    tc = t_crit(nblocks - 1, level)
     rows = []
     for key, est in full.items():
         th = np.array([rp[key] for rp in reps], dtype=float)
@@ -391,5 +467,7 @@ def jackknife(S, N, mid, nblocks):
         B = len(th)
         se = (np.sqrt((B - 1) / B * np.sum((th - th.mean()) ** 2))
               if B == nblocks and np.isfinite(est) else np.nan)
-        rows.append({"estimator": key[0], "classes": key[1], "est": est, "se": se})
+        rows.append({"estimator": key[0], "classes": key[1], "est": est, "se": se,
+                     "ci_lo": est - tc * se, "ci_hi": est + tc * se,
+                     "ci_level": level, "ci_df": nblocks - 1})
     return pd.DataFrame(rows)

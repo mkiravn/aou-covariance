@@ -28,6 +28,8 @@ palette checker, and the numbers below are the reason each is what it is:
 """
 import os
 
+import numpy as np
+
 SURFACE, INK, INK2, MUTED, GRID, AXIS = ("#ffffff", "#0b0b0b", "#52514e",
                                          "#898781", "#e1e0d9", "#c3c2b7")
 
@@ -160,3 +162,68 @@ def collect_run_plots(run_root, run, root="~/plots"):
     if not found:
         print(f"nothing under {run_root} -- has any notebook been run for this run?")
     return dst, per_stage
+
+
+def bulk_limits(centres, los, his, q=75, pad=0.06, floor=None):
+    """Axis limits driven by the bulk of the intervals, not the widest one.
+
+    A coefficient fitted on a handful of bins can be an order of magnitude less
+    precise than the rest of a forest panel, and letting its interval set the
+    axis squashes every other row into a sliver around zero. These limits cover
+    every point estimate plus the `q`-th percentile of the half-widths, so most
+    intervals fit and only the outliers need capping.
+
+    `floor` is a range always included -- (0, 1) for a heritability panel, so
+    the reader always has that scale even when every estimate is small.
+    Returns (lo, hi), or None if there is nothing finite to bound.
+    """
+    c = np.asarray(centres, float)
+    half = np.fmax(np.asarray(his, float) - c, c - np.asarray(los, float))
+    c, half = c[np.isfinite(c)], half[np.isfinite(half)]
+    if not len(c):
+        return None
+    reach = np.percentile(half, q) if len(half) else 0.0
+    lo, hi = c.min() - reach, c.max() + reach
+    if floor is not None:
+        lo, hi = min(lo, floor[0]), max(hi, floor[1])
+    span = hi - lo or max(abs(hi), 1.0)
+    return lo - pad * span, hi + pad * span
+
+
+def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0, **kw):
+    """`errorbar` that draws an arrowhead where an interval leaves the axis.
+
+    Call after the limits are set. An interval clipped at the axis edge without
+    a marker reads as a narrower interval than it is, which is the one thing an
+    interval must not do.
+
+    The arrowheads are drawn by hand rather than with matplotlib's
+    `xlolims`/`xuplims`: those put the arrow *at the data point* and drop the
+    bar entirely, so an interval clipped on both sides renders as a bare marker
+    with no interval at all -- the opposite of what it needs to say.
+    """
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    a0, a1 = ax.get_xlim() if horizontal else ax.get_ylim()
+    c = x if horizontal else y          # the centre on the error axis
+    have = np.isfinite(lo) & np.isfinite(hi)
+    under, over = have & (lo < a0), have & (hi > a1)
+    # np.fmax/fmin IGNORE NaN, so clipping a missing interval against the axis
+    # would silently produce a full-width bar. Zero those rows explicitly.
+    err = np.array([c - np.fmax(lo, a0), np.fmin(hi, a1) - c])
+    err[:, ~have] = 0.0
+    err[~np.isfinite(err)] = 0.0
+    np.clip(err, 0.0, None, out=err)    # a centre outside the axis can flip a side
+    art = ax.errorbar(x, y, **{"xerr" if horizontal else "yerr": err}, **kw)
+
+    col = kw.get("color") or kw.get("ecolor") or INK
+    z = kw.get("zorder", 3)
+    for flag, mark, edge in ((under, "<" if horizontal else "v", a0),
+                             (over, ">" if horizontal else "^", a1)):
+        if not np.any(flag):
+            continue
+        px = np.full(int(flag.sum()), edge) if horizontal else x[flag]
+        py = y[flag] if horizontal else np.full(int(flag.sum()), edge)
+        ax.plot(px, py, mark, ms=cap_ms, color=col, mec="none", ls="none",
+                clip_on=False, zorder=z + 0.1)
+    return art

@@ -119,10 +119,36 @@ def main():
               f"{got[key]:+.6f}  ({msg})")
 
     S, N = E.load_arrays(*build(tmp, mid, 0.002), len(mid), NBLOCKS)
-    se = E.jackknife(S, N, mid, NBLOCKS).set_index(["estimator", "classes"])["se"]
+    noisy = E.jackknife(S, N, mid, NBLOCKS).set_index(["estimator", "classes"])
+    se = noisy["se"]
     bad = [k for k in expect if not (np.isfinite(se[k]) and se[k] > 0)]
     fails += len(bad)
     print(f"\njackknife SEs finite and positive under noise: {len(expect) - len(bad)}/{len(expect)}")
+
+    # t critical values, against R's qt(p, df). The module computes these from
+    # its own incomplete beta rather than scipy, so they are worth pinning.
+    print()
+    for df, level, want in ((NBLOCKS - 1, 0.95, 2.009575), (NBLOCKS - 1, 0.99, 2.679952),
+                            (19, 0.95, 2.093024), (1, 0.95, 12.706205),
+                            (99, 0.95, 1.984217)):
+        got = E.t_crit(df, level)
+        ok = abs(got - want) < 1e-5
+        fails += not ok
+        print(f"{'OK  ' if ok else 'FAIL'} t_crit(df={df}, {level}) = {got:.6f}  "
+              f"R qt = {want:.6f}")
+    # and the interval is that multiplier applied to the SE, both-sided
+    tc = E.t_crit(NBLOCKS - 1, E.CI_LEVEL)
+    width = ((noisy["ci_hi"] - noisy["ci_lo"]) / noisy["se"]).dropna()
+    brackets = ((noisy["ci_lo"] <= noisy["est"]) & (noisy["est"] <= noisy["ci_hi"]))
+    for name, cond, msg in (
+        ("CI width is 2*t*se", np.allclose(width, 2 * tc), f"expected {2 * tc:.6f} SEs wide"),
+        ("CI brackets est", bool(brackets[noisy["se"].notna()].all()),
+         "every interval contains its own point estimate"),
+        ("CI df is nblocks-1", bool((noisy["ci_df"] == NBLOCKS - 1).all()),
+         "the SE comes from nblocks replicates"),
+    ):
+        fails += not cond
+        print(f"{'OK  ' if cond else 'FAIL'} {name:<24}({msg})")
 
     # the data carry band offsets, so the offset models must fit and predict better
     fit, contrasts = E.compare_models(S, N, mid, NBLOCKS)
