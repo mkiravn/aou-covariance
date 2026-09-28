@@ -84,9 +84,11 @@ def main():
         ("h2_RelOffsets", "pooled"): H2,
         ("RelOffsets.deg1", "pooled"): (B_FS + B_PO) / 2,
     }
+    # band names come from the module, so narrowing or widening DEG_BANDS does
+    # not silently leave this test asserting on a band that no longer exists
+    TRUE_OFFSET = {"deg4": 0.0, "deg3": 0.0, "deg2": B_HS, "deg1": B_FS}
     for model in ("OneSlopeOffsets", "RelOffsets"):
-        expect.update({(f"{model}.deg4", "noPO"): 0.0, (f"{model}.deg3", "noPO"): 0.0,
-                       (f"{model}.deg2", "noPO"): B_HS, (f"{model}.deg1", "noPO"): B_FS})
+        expect.update({(f"{model}.{d}", "noPO"): TRUE_OFFSET[d] for d in E.DEG_BANDS})
     fails = 0
     for key, want in expect.items():
         ok = abs(got[key] - want) < 1e-9

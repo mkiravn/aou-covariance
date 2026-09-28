@@ -21,7 +21,8 @@ R = 0.05-0.7:
   h2_Rel               separate slope over T+R; its U slope is h2_Unrel
   h2_OneSlopeOffsets   one slope over U+R, plus an offset per degree band
   h2_RelOffsets        separate slope over R, plus an offset per degree band
-Offsets are identified only above 0.05, so T is left out of the offset models.
+Offsets are identified only from DEG_LO (0.09) upward, so T and the
+4th-degree band are left out of the offset models.
 With an offset in every band, the related slope of h2_RelOffsets comes only
 from variation in a within each degree. U and R share no bins, so the U slope
 of the two-slope models is exactly h2_Unrel. Differences are computed inside
@@ -35,9 +36,13 @@ NOPO = ["other", "FS"]
 POOLED = ["other", "FS", "PO"]
 
 U_HI, T_HI, R_HI = 0.02, 0.05, 0.7
-# KING degree cutoffs (kinship 0.0442/0.0884/0.177/0.354, doubled) rounded to bin edges
-DEG_BANDS = {"deg4": (0.05, 0.09), "deg3": (0.09, 0.18),
-             "deg2": (0.18, 0.36), "deg1": (0.36, R_HI)}
+# KING degree cutoffs (kinship 0.0884/0.177/0.354, doubled) rounded to bin edges.
+# The offsets start at deg3: the 4th-degree band (0.05-0.09) is barely related,
+# and an offset fitted there is dominated by noise in a_ij rather than by any
+# real level shift. Pairs below DEG_LO are therefore left out of the offset
+# models entirely -- they are not silently absorbed into a reference band.
+DEG_BANDS = {"deg3": (0.09, 0.18), "deg2": (0.18, 0.36), "deg1": (0.36, R_HI)}
+DEG_LO = min(lo for lo, _ in DEG_BANDS.values())
 
 
 def load_grid(bins_path):
@@ -137,9 +142,9 @@ def estimates(S, N, r, mid):
         fit(label, classes, [(-np.inf, R_HI)], origin, {"h2_OneSlope": lambda b: b[0]})
         fit(label, classes, [(-np.inf, R_HI)], two_slopes,
             {"h2_Rel": lambda b: b[1], "diff_Rel-Unrel": lambda b: b[1] - b[0]})
-        fit(label, classes, [unrel, (T_HI, R_HI)], lambda a: np.c_[a, offsets(a)],
+        fit(label, classes, [unrel, (DEG_LO, R_HI)], lambda a: np.c_[a, offsets(a)],
             {"h2_OneSlopeOffsets": lambda b: b[0], **band_readouts("OneSlopeOffsets", 1)})
-        fit(label, classes, [unrel, (T_HI, R_HI)], lambda a: np.c_[two_slopes(a), offsets(a)],
+        fit(label, classes, [unrel, (DEG_LO, R_HI)], lambda a: np.c_[two_slopes(a), offsets(a)],
             {"h2_RelOffsets": lambda b: b[1], "diff_RelOffsets-Unrel": lambda b: b[1] - b[0],
              **band_readouts("RelOffsets", 2)})
         out[("diff_Rel-RelOffsets", label)] = out[("h2_Rel", label)] - out[("h2_RelOffsets", label)]
@@ -162,9 +167,9 @@ def _offsets(a):
 LADDER = {
     "h2_OneSlope": ([(-np.inf, R_HI)], lambda a: a[:, None]),
     "h2_Rel": ([(-np.inf, R_HI)], lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI)]),
-    "h2_OneSlopeOffsets": ([(-np.inf, U_HI), (T_HI, R_HI)],
+    "h2_OneSlopeOffsets": ([(-np.inf, U_HI), (DEG_LO, R_HI)],
                            lambda a: np.c_[a, _offsets(a)]),
-    "h2_RelOffsets": ([(-np.inf, U_HI), (T_HI, R_HI)],
+    "h2_RelOffsets": ([(-np.inf, U_HI), (DEG_LO, R_HI)],
                       lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI), _offsets(a)]),
 }
 # nested pairs: (simpler, richer); the richer model adds the named term
