@@ -15,18 +15,30 @@ Class sets:
   pooled  other + FS + PO   what an unclassified run would give
   PO      PO only       for the FS-range estimators, as a contrast
 
-Slope ladder, all slopes through the origin; U = a < 0.02, T = 0.02-0.05,
-R = 0.05-0.7:
-  h2_OneSlope          one slope over U+T+R
-  h2_Rel               separate slope over T+R; its U slope is h2_Unrel
-  h2_OneSlopeOffsets   one slope over U+R, plus an offset per degree band
-  h2_RelOffsets        separate slope over R, plus an offset per degree band
-Offsets are identified only from DEG_LO (0.09) upward, so T and the
-4th-degree band are left out of the offset models.
-With an offset in every band, the related slope of h2_RelOffsets comes only
-from variation in a within each degree. U and R share no bins, so the U slope
-of the two-slope models is exactly h2_Unrel. Differences are computed inside
-each jackknife replicate, so their SEs carry the covariance of the two terms.
+Model ladder. U = a < 0.02, T = 0.02-0.05, R = 0.05-0.7; the offset bands
+tile [BAND_LO, R_HI) and are NOT labelled by degree -- they are relatedness
+intervals, and naming them deg1/deg2 asserted a pedigree interpretation the
+data do not carry.
+
+  h2_Unrel             U only, through the origin
+  h2_UnrelInt          U only, slope and intercept
+  h2_OneSlope          one slope through the origin over U+T+R
+  h2_Rel               related pairs only (T+R), slope AND intercept -- a
+                       separate regression, sharing nothing with U
+  h2_OneSlopeOffsets   related pairs only, one slope plus an intercept per band
+  h2_RelOffsets        related pairs only, a slope AND an intercept per band
+
+None of the three related-range models uses an unrelated bin, so each is a
+regression on the related pairs in its own right rather than a constrained
+version of the unrelated fit. That makes them comparable with each other on
+the same data, and makes every contrast against h2_Unrel a comparison of two
+independent fits.
+
+h2_RelOffsets reports the slope in the TOP band (the first-degree range) as
+its headline, with every band's slope and intercept alongside; with a slope
+and an intercept per band, each band's slope comes only from variation in a
+within that band. Differences are computed inside each jackknife replicate, so
+their SEs carry the covariance of the two terms.
 """
 import numpy as np
 import pandas as pd
@@ -36,13 +48,17 @@ NOPO = ["other", "FS"]
 POOLED = ["other", "FS", "PO"]
 
 U_HI, T_HI, R_HI = 0.02, 0.05, 0.7
-# KING degree cutoffs (kinship 0.0884/0.177/0.354, doubled) rounded to bin edges.
-# The offsets start at deg3: the 4th-degree band (0.05-0.09) is barely related,
-# and an offset fitted there is dominated by noise in a_ij rather than by any
-# real level shift. Pairs below DEG_LO are therefore left out of the offset
-# models entirely -- they are not silently absorbed into a reference band.
-DEG_BANDS = {"deg3": (0.09, 0.18), "deg2": (0.18, 0.36), "deg1": (0.36, R_HI)}
-DEG_LO = min(lo for lo, _ in DEG_BANDS.values())
+# Relatedness bands for the offset models, ascending. The edges are KING's
+# kinship cutoffs (0.0884 / 0.177 / 0.354) doubled and rounded to bin edges,
+# but they are labelled band1..band3 rather than by degree: the band is a range
+# of a_ij, and calling it "deg2" claims a pedigree relationship that the GRM
+# alone cannot establish. The lowest band starts at 0.09 -- below that pairs are
+# barely related and an offset there is noise in a_ij, not a level shift -- and
+# pairs under BAND_LO are left out of the offset models rather than absorbed
+# into an unmodelled reference band.
+OFFSET_BANDS = {"band1": (0.09, 0.18), "band2": (0.18, 0.36), "band3": (0.36, R_HI)}
+BAND_LO = min(lo for lo, _ in OFFSET_BANDS.values())
+DEG_BANDS, DEG_LO = OFFSET_BANDS, BAND_LO   # old names, for archived notebooks
 
 
 def load_grid(bins_path):
@@ -72,6 +88,18 @@ def load_arrays(full_path, jk_path, nbins, nblocks):
 
 def _ind(a, lo, hi):
     return ((a >= lo) & (a < hi)).astype(float)
+
+
+def _band_ind(a):
+    """One indicator column per offset band."""
+    return np.column_stack([_ind(a, lo, hi) for lo, hi in OFFSET_BANDS.values()])
+
+
+def _band_slope_ind(a):
+    """A slope column then an indicator column per band: slope AND intercept
+    free to differ between bands, with nothing shared across them."""
+    ind = _band_ind(a)
+    return np.column_stack([a[:, None] * ind, ind])
 
 
 def _wls(X, m, n):
@@ -106,10 +134,14 @@ def estimates(S, N, r, mid):
             out[(name, label)] = readout(beta) if beta is not None else np.nan
 
     origin = lambda a: a[:, None]
+    slope_int = lambda a: np.c_[a, np.ones_like(a)]
     step = lambda a: np.c_[a, _ind(a, .4, .6), _ind(a, .2, .4)]
-    two_slopes = lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI)]
-    offsets = lambda a: np.column_stack([_ind(a, lo, hi) for lo, hi in DEG_BANDS.values()])
+    offsets = _band_ind
+    slopes_offsets = _band_slope_ind
     unrel = (-np.inf, U_HI)
+    related = (U_HI, R_HI)          # h2_Rel: everything above U, no unrelated bins
+    banded = (BAND_LO, R_HI)        # the offset models: the banded range only
+    NB = len(OFFSET_BANDS)
 
     # SNP heritability from unrelated pairs; no intercept
     fit("noPO", NOPO, [unrel], origin, {"h2_Unrel": lambda b: b[0]})
@@ -124,29 +156,37 @@ def estimates(S, N, r, mid):
         fit(label, classes, [(0.4, 0.6)], lambda a: np.c_[a, np.ones_like(a)],
             {"b2_FS": lambda b: 2 * b[1], "b2_FS.slope": lambda b: b[0]})
 
-    band_readouts = lambda model, first: {f"{model}.{d}": (lambda b, i=first + j: b[i])
-                                          for j, d in enumerate(DEG_BANDS)}
+    band_readouts = lambda model, first, tag="int": {
+        f"{model}.{tag}.{d}": (lambda b, i=first + j: b[i])
+        for j, d in enumerate(OFFSET_BANDS)}
     for label, classes in (("noPO", NOPO), ("pooled", POOLED)):
         # quadratic absorbs non-linearity (Wainschtein et al. 2025)
         fit(label, classes, [(0.05, 0.7)], lambda a: np.c_[a, a ** 2],
             {"h2_PedW25": lambda b: b[0], "PedW25.quad": lambda b: b[1]})
-        # intercept offsets at pedigree-class transitions
-        fit(label, classes, [(0.05, 0.7)],
-            lambda a: np.c_[a, _ind(a, .1, .2), _ind(a, .2, .4), _ind(a, .4, .6)],
-            {"h2_Pedf": lambda b: b[0]})
         # separate FS (0.4-0.6) and HS (0.2-0.4) intercepts, common slope
         fit(label, classes, [(0.2, 0.6)], step,
             {"b2_step": lambda b: 4 * (b[1] - b[2]),
              "b2_step_ratio": lambda b: b[1] / b[2] if b[2] != 0 else np.nan})
 
+        # one slope through the origin over everything, as a reference rung
         fit(label, classes, [(-np.inf, R_HI)], origin, {"h2_OneSlope": lambda b: b[0]})
-        fit(label, classes, [(-np.inf, R_HI)], two_slopes,
-            {"h2_Rel": lambda b: b[1], "diff_Rel-Unrel": lambda b: b[1] - b[0]})
-        fit(label, classes, [unrel, (DEG_LO, R_HI)], lambda a: np.c_[a, offsets(a)],
-            {"h2_OneSlopeOffsets": lambda b: b[0], **band_readouts("OneSlopeOffsets", 1)})
-        fit(label, classes, [unrel, (DEG_LO, R_HI)], lambda a: np.c_[two_slopes(a), offsets(a)],
-            {"h2_RelOffsets": lambda b: b[1], "diff_RelOffsets-Unrel": lambda b: b[1] - b[0],
-             **band_readouts("RelOffsets", 2)})
+        # related pairs only, with their own intercept: a separate regression
+        fit(label, classes, [related], slope_int,
+            {"h2_Rel": lambda b: b[0], "Rel.intercept": lambda b: b[1]})
+        # related pairs only: one slope, an intercept per band
+        fit(label, classes, [banded], lambda a: np.c_[a, offsets(a)],
+            {"h2_OneSlopeOffsets": lambda b: b[0],
+             **band_readouts("OneSlopeOffsets", 1)})
+        # related pairs only: a slope and an intercept per band. The headline is
+        # the top band's slope -- the first-degree range this project is about.
+        fit(label, classes, [banded], slopes_offsets,
+            {"h2_RelOffsets": lambda b: b[NB - 1],
+             **band_readouts("RelOffsets", 0, "slope"),
+             **band_readouts("RelOffsets", NB, "int")})
+        # contrasts against the unrelated fit, formed inside the replicate
+        for nm in ("h2_Rel", "h2_RelOffsets"):
+            out[(f"diff_{nm[3:]}-Unrel", label)] = (
+                out[(nm, label)] - out[("h2_Unrel", "noPO")])
         out[("diff_Rel-RelOffsets", label)] = out[("h2_Rel", label)] - out[("h2_RelOffsets", label)]
 
     # mean cross-product above the additive prediction h2_Unrel * a_ij
@@ -185,24 +225,37 @@ def bin_curve(S, N, classes, mid, nblocks):
     return mid[k], s0[k] / n0[k], n0[k], se[k]
 
 
-def _offsets(a):
-    return np.column_stack([_ind(a, lo, hi) for lo, hi in DEG_BANDS.values()])
-
-
 # the ladder as (ranges, design), for fit comparison; readouts live in estimates()
+# Goodness of fit is only comparable between models fitted on the SAME bins, so
+# the ladder used for comparison is deliberately not the same list as the
+# reported estimators:
+#
+#   h2_OneSlope  spans U+T+R and is listed for reference only -- its chi-square
+#                is not comparable with the rest, and no nested pair uses it.
+#   Rel_banded   slope + one intercept, on the banded range. This is h2_Rel's
+#                design refitted on the offset models' bins. The REPORTED
+#                h2_Rel uses the wider (U_HI, R_HI) range, because throwing
+#                away 0.02-0.09 would discard a lot of pairs for an estimate
+#                that does not need the bands; that makes it unusable as a
+#                nesting baseline, hence this twin.
+#   the two offset models, already on the banded range.
+#
+# Rel_banded subset OneSlopeOffsets subset RelOffsets, all on [BAND_LO, R_HI),
+# so the two contrasts below are genuine nested comparisons.
 LADDER = {
     "h2_OneSlope": ([(-np.inf, R_HI)], lambda a: a[:, None]),
-    "h2_Rel": ([(-np.inf, R_HI)], lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI)]),
-    "h2_OneSlopeOffsets": ([(-np.inf, U_HI), (DEG_LO, R_HI)],
-                           lambda a: np.c_[a, _offsets(a)]),
-    "h2_RelOffsets": ([(-np.inf, U_HI), (DEG_LO, R_HI)],
-                      lambda a: np.c_[a * (a < U_HI), a * (a >= U_HI), _offsets(a)]),
+    "Rel_banded": ([(BAND_LO, R_HI)], lambda a: np.c_[a, np.ones_like(a)]),
+    "h2_OneSlopeOffsets": ([(BAND_LO, R_HI)], lambda a: np.c_[a, _band_ind(a)]),
+    "h2_RelOffsets": ([(BAND_LO, R_HI)], _band_slope_ind),
 }
 # nested pairs: (simpler, richer); the richer model adds the named term
-NESTED = {"offsets, one slope": ("h2_OneSlope", "h2_OneSlopeOffsets"),
-          "offsets, two slopes": ("h2_Rel", "h2_RelOffsets"),
-          "second slope, no offsets": ("h2_OneSlope", "h2_Rel"),
-          "second slope, with offsets": ("h2_OneSlopeOffsets", "h2_RelOffsets")}
+# (simpler, richer); both fitted on [BAND_LO, R_HI), so the change in
+# chi-square per bin is a like-for-like nested comparison. df added is
+# len(OFFSET_BANDS) - 1 for the first and len(OFFSET_BANDS) - 1 for the second.
+NESTED = {"band intercepts": ("Rel_banded", "h2_OneSlopeOffsets"),
+          "band slopes too": ("h2_OneSlopeOffsets", "h2_RelOffsets")}
+NESTED_DF = {"band intercepts": len(OFFSET_BANDS) - 1,
+             "band slopes too": len(OFFSET_BANDS) - 1}
 
 
 def _cells(S, N, r, ci, mid, ranges):
@@ -273,8 +326,10 @@ def compare_models(S, N, mid, nblocks, classes=NOPO):
         d = d[np.isfinite(d)]
         se = (np.sqrt((len(d) - 1) / len(d) * np.sum((d - d.mean()) ** 2))
               if len(d) == nblocks else np.nan)
-        contrast_rows.append({"contrast": label, "adds": rich, "delta_chi2_per_bin": delta[0],
-                              "se": se, "z": delta[0] / se if se and np.isfinite(se) else np.nan})
+        contrast_rows.append({"contrast": label, "adds": rich,
+                              "df_added": NESTED_DF.get(label, np.nan),
+                              "delta_chi2_per_bin": delta[0], "se": se,
+                              "z": delta[0] / se if se and np.isfinite(se) else np.nan})
     return pd.DataFrame(fit_rows), pd.DataFrame(contrast_rows)
 
 

@@ -71,7 +71,6 @@ def main():
         ("Unrel.intercept", "noPO"): 0.0,
         ("b2_FS", "noPO"): 2 * B_FS,
         ("b2_FS", "PO"): 2 * B_PO,
-        ("h2_Pedf", "noPO"): H2,
         ("b2_step", "noPO"): 4 * (B_FS - B_HS),
         ("b2_step_ratio", "noPO"): B_FS / B_HS,
         ("excess", "FS"): B_FS,
@@ -82,13 +81,19 @@ def main():
         # PO and FS pairs share bins in equal numbers, so pooling averages
         # their offsets and leaves the slope untouched
         ("h2_RelOffsets", "pooled"): H2,
-        ("RelOffsets.deg1", "pooled"): (B_FS + B_PO) / 2,
+        ("RelOffsets.int.band3", "pooled"): (B_FS + B_PO) / 2,
     }
-    # band names come from the module, so narrowing or widening DEG_BANDS does
-    # not silently leave this test asserting on a band that no longer exists
-    TRUE_OFFSET = {"deg4": 0.0, "deg3": 0.0, "deg2": B_HS, "deg1": B_FS}
-    for model in ("OneSlopeOffsets", "RelOffsets"):
-        expect.update({(f"{model}.{d}", "noPO"): TRUE_OFFSET[d] for d in E.DEG_BANDS})
+    # Band names and ranges come from the module, so re-cutting the bands
+    # cannot leave this test asserting on one that no longer exists. The truth
+    # is keyed by RANGE: the generating intercept is B_HS over the half-sib
+    # band and B_FS over the first-degree band, whatever those bands are called.
+    TRUE_BY_RANGE = {(0.09, 0.18): 0.0, (0.18, 0.36): B_HS, (0.36, E.R_HI): B_FS}
+    expect.update({(f"OneSlopeOffsets.int.{d}", "noPO"): TRUE_BY_RANGE[r]
+                   for d, r in E.OFFSET_BANDS.items()})
+    expect.update({(f"RelOffsets.int.{d}", "noPO"): TRUE_BY_RANGE[r]
+                   for d, r in E.OFFSET_BANDS.items()})
+    # a slope per band, each recovering the generating slope
+    expect.update({(f"RelOffsets.slope.{d}", "noPO"): H2 for d in E.OFFSET_BANDS})
     fails = 0
     for key, want in expect.items():
         ok = abs(got[key] - want) < 1e-9
@@ -103,11 +108,13 @@ def main():
         (("b2_FS", "pooled"), 2 * B_PO < got[("b2_FS", "pooled")] < 2 * B_FS,
          "PO pairs dilute the FS shared-environment estimate"),
         (("h2_Rel", "noPO"), got[("h2_Rel", "noPO")] > H2,
-         "without offsets the related slope absorbs the HS and FS intercepts"),
+         "one intercept for the whole related range cannot absorb both the HS "
+         "and FS levels, so the slope takes up the slack"),
         (("diff_Rel-RelOffsets", "noPO"), got[("diff_Rel-RelOffsets", "noPO")] > 0,
          "offsets remove that excess"),
-        (("h2_OneSlope", "noPO"), H2 < got[("h2_OneSlope", "noPO")] < got[("h2_Rel", "noPO")],
-         "one slope sits between the unrelated and related slopes"),
+        (("h2_OneSlope", "noPO"), H2 < got[("h2_OneSlope", "noPO")],
+         "a single origin slope over everything is pulled up by the related "
+         "intercepts"),
     ):
         fails += not cond
         print(f"{'OK  ' if cond else 'FAIL'} {key[0]:<24}{key[1]:<7} "
@@ -127,18 +134,17 @@ def main():
     print(contrasts.round(3).to_string())
     for name, cond, msg in (
         ("chi2 favours offsets",
-         fit.loc["h2_RelOffsets", "chi2_per_bin"] < fit.loc["h2_Rel", "chi2_per_bin"],
-         "adding band offsets lowers misfit"),
+         fit.loc["h2_RelOffsets", "chi2_per_bin"] < fit.loc["Rel_banded", "chi2_per_bin"],
+         "adding band offsets lowers misfit, on the same bins"),
         ("cv no worse",
          fit.loc["h2_RelOffsets", "cv_error"] <= fit.loc["h2_OneSlope", "cv_error"] * 1.01,
          "held-out error is small here: each replicate leaves out 2/nblocks of the pairs"),
-        ("offset contrasts positive",
-         min(contrasts.loc[c, "delta_chi2_per_bin"]
-             for c in ("offsets, one slope", "offsets, two slopes")) > 0,
-         "adding the term the data were generated with improves fit"),
-        ("nothing left to add",
-         abs(contrasts.loc["second slope, with offsets", "delta_chi2_per_bin"]) < 1e-6,
-         "a second slope adds nothing once the offsets are in"),
+        ("band intercepts earn their place",
+         contrasts.loc["band intercepts", "delta_chi2_per_bin"] > 0,
+         "the data were generated with a per-band level shift"),
+        ("band slopes add nothing",
+         abs(contrasts.loc["band slopes too", "delta_chi2_per_bin"]) < 1e-6,
+         "one slope generated every band, so freeing the slopes cannot help"),
     ):
         fails += not cond
         print(f"{'OK  ' if cond else 'FAIL'} {name:<24}({msg})")
