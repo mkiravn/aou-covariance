@@ -11,9 +11,15 @@ of the merge's delete-block replicates (the .jk.tsv), using the same blocks the
 accumulators were built with.
 
 Class sets:
-  noPO    other + FS    primary -- parent-offspring pairs removed
-  pooled  other + FS + PO   what an unclassified run would give
-  PO      PO only       for the FS-range estimators, as a contrast
+  noPO    other + FS    the only set anything is reported on
+  PO      PO only       first-degree estimators, as a contrast
+
+`pooled` (other + FS + PO) is deliberately NOT computed. It is what an
+unclassified run would have given, and every estimator here is read off a range
+where parent-offspring pairs change the meaning of the answer: PO pairs share
+neither dominance nor a rearing environment, so a fit that mixes them in has no
+interpretation to defend. POOLED remains defined for `bin_curve` callers that
+want the all-pairs curve for a figure.
 
 Model ladder. U = a < 0.02, T = 0.02-0.05, R = 0.05-0.7; the offset bands
 tile [BAND_LO, R_HI) and are NOT labelled by degree -- they are relatedness
@@ -149,7 +155,7 @@ def estimates(S, N, r, mid):
     fit("noPO", NOPO, [unrel], lambda a: np.c_[a, np.ones_like(a)],
         {"h2_UnrelInt": lambda b: b[0], "Unrel.intercept": lambda b: b[1]})
 
-    for label, classes in (("noPO", NOPO), ("pooled", POOLED), ("PO", ["PO"])):
+    for label, classes in (("noPO", NOPO), ("PO", ["PO"])):
         # classic sib regression -- slope conflates h2 and shared environment
         fit(label, classes, [(0.4, 0.6)], origin, {"h2_FS": lambda b: b[0]})
         # shared environment among first-degree pairs
@@ -159,7 +165,7 @@ def estimates(S, N, r, mid):
     band_readouts = lambda model, first, tag="int": {
         f"{model}.{tag}.{d}": (lambda b, i=first + j: b[i])
         for j, d in enumerate(OFFSET_BANDS)}
-    for label, classes in (("noPO", NOPO), ("pooled", POOLED)):
+    for label, classes in (("noPO", NOPO),):
         # quadratic absorbs non-linearity (Wainschtein et al. 2025)
         fit(label, classes, [(0.05, 0.7)], lambda a: np.c_[a, a ** 2],
             {"h2_PedW25": lambda b: b[0], "PedW25.quad": lambda b: b[1]})
@@ -226,9 +232,18 @@ def bin_curve(S, N, classes, mid, nblocks):
 
 
 # the ladder as (ranges, design), for fit comparison; readouts live in estimates()
+# The REPORTED models, as (ranges, design) -- what a figure should draw, and
+# the same specs estimates() fits. Keyed by the estimator name each reports.
+MODELS = {
+    "h2_OneSlope": ([(-np.inf, R_HI)], lambda a: a[:, None]),
+    "h2_Rel": ([(U_HI, R_HI)], lambda a: np.c_[a, np.ones_like(a)]),
+    "h2_OneSlopeOffsets": ([(BAND_LO, R_HI)], lambda a: np.c_[a, _band_ind(a)]),
+    "h2_RelOffsets": ([(BAND_LO, R_HI)], _band_slope_ind),
+}
+
 # Goodness of fit is only comparable between models fitted on the SAME bins, so
-# the ladder used for comparison is deliberately not the same list as the
-# reported estimators:
+# the ladder used for comparison is deliberately NOT the same list as MODELS
+# above -- h2_Rel is swapped for a twin refitted on the banded range:
 #
 #   h2_OneSlope  spans U+T+R and is listed for reference only -- its chi-square
 #                is not comparable with the rest, and no nested pair uses it.

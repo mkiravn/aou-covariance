@@ -78,10 +78,10 @@ def main():
         ("h2_OneSlopeOffsets", "noPO"): H2,
         ("h2_RelOffsets", "noPO"): H2,
         ("diff_RelOffsets-Unrel", "noPO"): 0.0,
-        # PO and FS pairs share bins in equal numbers, so pooling averages
-        # their offsets and leaves the slope untouched
-        ("h2_RelOffsets", "pooled"): H2,
-        ("RelOffsets.int.band3", "pooled"): (B_FS + B_PO) / 2,
+        # `pooled` is no longer computed, so the checks that used it -- that
+        # pooling averages the FS and PO offsets and leaves the slope untouched
+        # -- are gone with it. The per-class machinery is still covered by the
+        # noPO and PO expectations above.
     }
     # Band names and ranges come from the module, so re-cutting the bands
     # cannot leave this test asserting on one that no longer exists. The truth
@@ -105,8 +105,6 @@ def main():
     for key, cond, msg in (
         (("h2_FS", "noPO"), got[("h2_FS", "noPO")] > H2,
          "slope through the origin absorbs the FS intercept"),
-        (("b2_FS", "pooled"), 2 * B_PO < got[("b2_FS", "pooled")] < 2 * B_FS,
-         "PO pairs dilute the FS shared-environment estimate"),
         (("h2_Rel", "noPO"), got[("h2_Rel", "noPO")] > H2,
          "one intercept for the whole related range cannot absorb both the HS "
          "and FS levels, so the slope takes up the slack"),
