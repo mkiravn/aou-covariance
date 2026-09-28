@@ -36,7 +36,7 @@ SURFACE, INK, INK2, MUTED, GRID, AXIS = ("#ffffff", "#0b0b0b", "#52514e",
 CLASS_COL = {"other": "#2a78d6", "FS": "#eb6834", "PO": "#1baf7a",
              "noPO": "#eb6834", "pooled": "#2a78d6"}
 CLASS_MARK = {"other": "o", "FS": "s", "PO": "^", "noPO": "o", "pooled": "s"}
-CLASS_LABEL = {"other": "unrelated / distant", "FS": "full sibs",
+CLASS_LABEL = {"other": "unrelated", "FS": "full sibs",
                "PO": "parent-offspring"}
 
 MODEL_COL = {"h2_OneSlope": "#DD5129", "h2_Rel": "#0F7BA2",
@@ -141,9 +141,20 @@ def mirror_plots(src_dir, tag, run, root="~/plots"):
     dst = os.path.join(os.path.expanduser(root), run, tag)
     os.makedirs(dst, exist_ok=True)
     found = sorted(glob.glob(os.path.join(src_dir, "**", "*.png"), recursive=True))
+    keep = {os.path.basename(f) for f in found}
+    # Prune first. The bucket accumulates figures written under filenames that
+    # earlier versions of a notebook used, and a stale one in here is
+    # indistinguishable from a current one -- the whole point of this directory
+    # is to be flicked through without checking provenance. Only this mirror is
+    # pruned; the bucket copy is the durable record and is left alone.
+    stale = [f for f in glob.glob(os.path.join(dst, "*.png"))
+             if os.path.basename(f) not in keep]
+    for f in stale:
+        os.remove(f)
     for f in found:
         shutil.copy2(f, os.path.join(dst, os.path.basename(f)))
-    print(f"{len(found)} PNG -> {dst}")
+    print(f"{len(found)} PNG -> {dst}"
+          + (f"  ({len(stale)} stale removed)" if stale else ""))
     return dst
 
 
@@ -158,17 +169,36 @@ def collect_run_plots(run_root, run, root="~/plots"):
     dst = os.path.join(os.path.expanduser(root), run, "all")
     os.makedirs(dst, exist_ok=True)
     found = sorted(glob.glob(os.path.join(run_root, "**", "*.png"), recursive=True))
-    per_stage = {}
+    per_stage, keep = {}, set()
     for s in found:
         stage = os.path.relpath(s, run_root).split(os.sep)[0]
-        shutil.copy2(s, os.path.join(dst, f"{stage}__{os.path.basename(s)}"))
+        name = f"{stage}__{os.path.basename(s)}"
+        keep.add(name)
+        shutil.copy2(s, os.path.join(dst, name))
         per_stage[stage] = per_stage.get(stage, 0) + 1
-    print(f"{len(found)} PNG -> {dst}")
+    # same pruning as mirror_plots: a figure from an earlier version of a
+    # notebook, under a filename it no longer writes, is worse than missing
+    stale = [f for f in glob.glob(os.path.join(dst, "*.png"))
+             if os.path.basename(f) not in keep]
+    for f in stale:
+        os.remove(f)
+    print(f"{len(found)} PNG -> {dst}"
+          + (f"  ({len(stale)} stale removed)" if stale else ""))
     for stage, n in sorted(per_stage.items()):
         print(f"  {n:>4}  {stage}")
     if not found:
         print(f"nothing under {run_root} -- has any notebook been run for this run?")
     return dst, per_stage
+
+
+def si(n):
+    """Pair counts for a legend key: 1996971 -> "2.0M". Spelled-out counts were
+    the widest thing in the legend and their last five digits carry nothing."""
+    n = float(n)
+    for cut, suf in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if abs(n) >= cut:
+            return f"{n / cut:.1f}{suf}".replace(".0", "")
+    return f"{n:,.0f}"
 
 
 def bulk_limits(centres, los, his, q=75, pad=0.06, floor=None):
