@@ -30,6 +30,12 @@ import os
 
 import numpy as np
 
+# Bump whenever a public signature changes or a function is added. The
+# notebooks assert a minimum, which a hasattr() check cannot do: when
+# capped_errorbar gained err_alpha the name was still there, so the old copy
+# on the VM passed the name check and then threw deep inside matplotlib.
+API = 1
+
 SURFACE, INK, INK2, MUTED, GRID, AXIS = ("#ffffff", "#0b0b0b", "#52514e",
                                          "#898781", "#e1e0d9", "#c3c2b7")
 
