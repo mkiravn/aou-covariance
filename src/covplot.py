@@ -358,3 +358,24 @@ def repel_labels(ax, x, y, labels, fontsize=6.0, color=None, iters=400,
                             fontsize=fontsize, color=color, ha="center",
                             va="center", zorder=6))
     return arts
+
+
+def clip_limits(estimates, window, pad=0.03):
+    """A fixed axis window, widened only if a POINT ESTIMATE falls outside it.
+
+    Intervals may run off the axis -- `capped_errorbar` marks the ones that do,
+    so nothing is hidden. A point estimate may not: a marker outside the panel
+    is simply missing, with no cue that it exists. So the window is the default
+    and the estimates are the only thing allowed to override it.
+
+    This is the opposite trade from `bulk_limits`, which derives the window
+    from the data. Use this one where the scale is known in advance and worth
+    holding fixed across panels and phenotypes, so figures can be compared.
+    """
+    v = np.asarray(estimates, float)
+    v = v[np.isfinite(v)]
+    lo, hi = float(window[0]), float(window[1])
+    if len(v):
+        lo, hi = min(lo, float(v.min())), max(hi, float(v.max()))
+    span = (hi - lo) or 1.0
+    return lo - pad * span, hi + pad * span
