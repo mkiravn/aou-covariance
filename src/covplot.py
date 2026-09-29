@@ -228,7 +228,7 @@ def bulk_limits(centres, los, his, q=75, pad=0.06, floor=None):
 
 
 def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
-                    out_ms=7.0, **kw):
+                    out_ms=7.0, err_alpha=None, **kw):
     """`errorbar` with arrowheads where an interval -- or an estimate -- leaves
     the axis.
 
@@ -239,6 +239,13 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
     hollow triangle pinned to the edge, pointing the way they went, so a strict
     axis window never hides a point -- it only refuses to rescale for it.
 
+    `err_alpha` fades the intervals WITHOUT fading the markers. Passing
+    matplotlib's own `alpha` cannot do that -- it applies to every artist the
+    call produces -- so the bars get it baked into `ecolor` instead and the
+    points keep full opacity. The interval caps take the faded colour too,
+    since they are part of the interval; a marker for an off-scale ESTIMATE
+    does not, since it is the point.
+
     The arrowheads are drawn by hand rather than with matplotlib's
     `xlolims`/`xuplims`: those put the arrow *at the data point* and drop the
     bar entirely, so an interval clipped on both sides renders as a bare marker
@@ -246,6 +253,10 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
     """
     x, y = np.asarray(x, float), np.asarray(y, float)
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    if err_alpha is not None:
+        import matplotlib.colors as mcolors
+        kw["ecolor"] = mcolors.to_rgba(kw.get("ecolor") or kw.get("color") or INK,
+                                       err_alpha)
     a0, a1 = ax.get_xlim() if horizontal else ax.get_ylim()
     c = x if horizontal else y          # the centre on the error axis
     inside = ~np.isfinite(c) | ((c >= a0) & (c <= a1))
@@ -262,7 +273,8 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
     yin = np.where(inside, y, np.nan)
     art = ax.errorbar(xin, yin, **{"xerr" if horizontal else "yerr": err}, **kw)
 
-    col = kw.get("color") or kw.get("ecolor") or INK
+    col = kw.get("color") or INK
+    cap_col = kw.get("ecolor") or col       # caps belong to the interval
     z = kw.get("zorder", 3)
     for flag, mark, edge in ((under, "<" if horizontal else "v", a0),
                              (over, ">" if horizontal else "^", a1)):
@@ -270,7 +282,7 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
             continue
         px = np.full(int(flag.sum()), edge) if horizontal else x[flag]
         py = y[flag] if horizontal else np.full(int(flag.sum()), edge)
-        ax.plot(px, py, mark, ms=cap_ms, color=col, mec="none", ls="none",
+        ax.plot(px, py, mark, ms=cap_ms, color=cap_col, mec="none", ls="none",
                 clip_on=False, zorder=z + 0.1)
     off = ~inside & np.isfinite(c)
     if np.any(off):
