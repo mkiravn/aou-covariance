@@ -227,12 +227,17 @@ def bulk_limits(centres, los, his, q=75, pad=0.06, floor=None):
     return lo - pad * span, hi + pad * span
 
 
-def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0, **kw):
-    """`errorbar` that draws an arrowhead where an interval leaves the axis.
+def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0,
+                    out_ms=7.0, **kw):
+    """`errorbar` with arrowheads where an interval -- or an estimate -- leaves
+    the axis.
 
     Call after the limits are set. An interval clipped at the axis edge without
     a marker reads as a narrower interval than it is, which is the one thing an
-    interval must not do.
+    interval must not do. An ESTIMATE outside the axis is worse: with no marker
+    it is simply absent, and nothing on the panel says so. Those are drawn as a
+    hollow triangle pinned to the edge, pointing the way they went, so a strict
+    axis window never hides a point -- it only refuses to rescale for it.
 
     The arrowheads are drawn by hand rather than with matplotlib's
     `xlolims`/`xuplims`: those put the arrow *at the data point* and drop the
@@ -243,15 +248,19 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0, **kw):
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     a0, a1 = ax.get_xlim() if horizontal else ax.get_ylim()
     c = x if horizontal else y          # the centre on the error axis
+    inside = ~np.isfinite(c) | ((c >= a0) & (c <= a1))
     have = np.isfinite(lo) & np.isfinite(hi)
-    under, over = have & (lo < a0), have & (hi > a1)
-    # np.fmax/fmin IGNORE NaN, so clipping a missing interval against the axis
-    # would silently produce a full-width bar. Zero those rows explicitly.
+    under, over = have & (lo < a0) & inside, have & (hi > a1) & inside
+
     err = np.array([c - np.fmax(lo, a0), np.fmin(hi, a1) - c])
     err[:, ~have] = 0.0
     err[~np.isfinite(err)] = 0.0
-    np.clip(err, 0.0, None, out=err)    # a centre outside the axis can flip a side
-    art = ax.errorbar(x, y, **{"xerr" if horizontal else "yerr": err}, **kw)
+    np.clip(err, 0.0, None, out=err)
+    # a point whose own estimate is off-scale gets no bar; it gets an edge marker
+    err[:, ~inside] = 0.0
+    xin = np.where(inside, x, np.nan)
+    yin = np.where(inside, y, np.nan)
+    art = ax.errorbar(xin, yin, **{"xerr" if horizontal else "yerr": err}, **kw)
 
     col = kw.get("color") or kw.get("ecolor") or INK
     z = kw.get("zorder", 3)
@@ -263,8 +272,19 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0, **kw):
         py = y[flag] if horizontal else np.full(int(flag.sum()), edge)
         ax.plot(px, py, mark, ms=cap_ms, color=col, mec="none", ls="none",
                 clip_on=False, zorder=z + 0.1)
+    off = ~inside & np.isfinite(c)
+    if np.any(off):
+        below = off & (c < a0)
+        for flag, mark, edge in ((below, "<" if horizontal else "v", a0),
+                                 (off & ~below, ">" if horizontal else "^", a1)):
+            if not np.any(flag):
+                continue
+            px = np.full(int(flag.sum()), edge) if horizontal else x[flag]
+            py = y[flag] if horizontal else np.full(int(flag.sum()), edge)
+            # hollow, and larger than an interval cap: this is the ESTIMATE
+            ax.plot(px, py, mark, ms=out_ms, mfc=SURFACE, mec=col, mew=1.1,
+                    ls="none", clip_on=False, zorder=z + 0.2)
     return art
-
 
 def shades(hex_colour, k, lo=0.45, hi=1.0):
     """`k` lightness steps of one hue, darkest first.
