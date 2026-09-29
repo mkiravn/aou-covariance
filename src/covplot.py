@@ -264,3 +264,97 @@ def capped_errorbar(ax, x, y, lo, hi, horizontal=True, cap_ms=6.0, **kw):
         ax.plot(px, py, mark, ms=cap_ms, color=col, mec="none", ls="none",
                 clip_on=False, zorder=z + 0.1)
     return art
+
+
+def shades(hex_colour, k, lo=0.45, hi=1.0):
+    """`k` lightness steps of one hue, darkest first.
+
+    For a model whose line is drawn in pieces that mean different things -- the
+    per-band slopes -- so the pieces stay one model to the eye while still
+    being told apart. A second hue would claim to be a second model.
+    """
+    import matplotlib.colors as mcolors
+    r, g, b = mcolors.to_rgb(hex_colour)
+    out = []
+    for t in (np.linspace(lo, hi, k) if k > 1 else [hi]):
+        # t < 1 darkens toward black, t = 1 is the colour itself
+        out.append(mcolors.to_hex((r * t, g * t, b * t)))
+    return out
+
+
+def repel_labels(ax, x, y, labels, fontsize=6.0, color=None, iters=400,
+                 link_lw=0.35):
+    """Scatter labels nudged apart, with a leader line back to the point.
+
+    matplotlib has no `geom_text_repel`, and on the phenotype scatters the
+    labels sat on top of each other and on the markers. This is the usual
+    iterative scheme, with one thing that matters: labels repel as BOXES sized
+    from the text, not as discs. A disc of the text's height leaves wide labels
+    overlapping horizontally; a disc of its width pushes short ones absurdly
+    far apart. Pairs are separated along whichever axis they overlap least on,
+    which is what keeps a row of labels from being flung vertically.
+
+    Works in axes fraction internally, so the data units cannot bias which
+    direction things move.
+    """
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    labels = [str(l) for l, k in zip(labels, ok) if k]
+    x, y = x[ok], y[ok]
+    if not len(x):
+        return []
+    color = color or MUTED
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    sx, sy = (x1 - x0) or 1.0, (y1 - y0) or 1.0
+
+    # label half-extents in axes fraction, from the axes size in points
+    bb = ax.get_window_extent()
+    ax_w = max(bb.width, 1.0) * 72.0 / ax.figure.dpi
+    ax_h = max(bb.height, 1.0) * 72.0 / ax.figure.dpi
+    hw = np.array([0.5 * len(l) * 0.58 * fontsize / ax_w for l in labels])
+    hh = np.full(len(labels), 0.5 * 1.35 * fontsize / ax_h)
+    mk = 0.5 * 5.0 / ax_h                       # marker half-size, points -> frac
+
+    px, py = (x - x0) / sx, (y - y0) / sy       # points
+    lx, ly = px.copy(), py + hh + mk            # labels start just above
+    rng = np.random.default_rng(0)
+    lx += rng.uniform(-1e-4, 1e-4, len(lx))     # break exact ties
+
+    for _ in range(iters):
+        moved = False
+        for i in range(len(lx)):
+            ddx, ddy = 0.0, 0.0
+            # label vs label, as boxes
+            ox = (hw + hw[i]) - np.abs(lx - lx[i])
+            oy = (hh + hh[i]) - np.abs(ly - ly[i])
+            ox[i] = oy[i] = -1.0
+            hit = (ox > 0) & (oy > 0)
+            for j in np.where(hit)[0]:
+                if ox[j] < oy[j]:               # cheaper to separate on x
+                    ddx += np.sign(lx[i] - lx[j] or 1e-6) * ox[j]
+                else:
+                    ddy += np.sign(ly[i] - ly[j] or 1e-6) * oy[j]
+            # label vs every marker
+            mox = (hw[i] + mk) - np.abs(lx[i] - px)
+            moy = (hh[i] + mk) - np.abs(ly[i] - py)
+            for j in np.where((mox > 0) & (moy > 0))[0]:
+                ddy += np.sign(ly[i] - py[j] or 1.0) * moy[j]
+            if ddx or ddy:
+                moved = True
+                lx[i] += 0.5 * ddx
+                ly[i] += 0.5 * ddy
+        if not moved:
+            break
+    lx = np.clip(lx, hw, 1 - hw)
+    ly = np.clip(ly, hh, 1 - hh)
+
+    arts = []
+    for i, lab in enumerate(labels):
+        if np.hypot(lx[i] - px[i], ly[i] - py[i]) > 2 * hh[i]:
+            ax.plot([x0 + px[i] * sx, x0 + lx[i] * sx],
+                    [y0 + py[i] * sy, y0 + ly[i] * sy],
+                    lw=link_lw, color=color, alpha=0.55, zorder=2)
+        arts.append(ax.text(x0 + lx[i] * sx, y0 + ly[i] * sy, lab,
+                            fontsize=fontsize, color=color, ha="center",
+                            va="center", zorder=6))
+    return arts
