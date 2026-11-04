@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "jupyter.notebookFileRoot": "${workspaceFolder}/aucov_across_pops",
+  "files.exclude": {"**/__pycache__": true},
+  "search.exclude": {".sim": true, ".tools": true, ".venv": true}
+}

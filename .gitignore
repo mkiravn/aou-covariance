@@ -63,3 +63,14 @@ __pycache__/
 
 # built by src/Makefile
 src/grm_class_tool
+
+# local-only: simulated data, downloaded tools, virtualenv
+.sim/
+.tools/
+.venv/
+
+# public, non-participant resources (LD regions, etc.)
+!resources/*
+
+# grm_class_tool test scratch (make clean removes it)
+src/test/tmp/

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aoucov"
+version = "0.1.0"
+description = "Run bookkeeping for the All of Us phenotypic-covariance pipeline"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml"]
+
+[project.scripts]
+aoucov = "aoucov.__main__:main"
+
+[tool.setuptools]
+packages = ["aoucov"]

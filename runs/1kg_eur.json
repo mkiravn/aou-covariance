@@ -1,0 +1,52 @@
+{
+  "run_id": "1kg_eur",
+  "root": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/1kg_eur",
+
+  "params": {
+    "n_shards": 20,
+    "nblocks": 50,
+    "seed": 1,
+    "maf": 0.01,
+    "pheno_suffix": "invnorm__base_pcs"
+  },
+
+  "lists": {
+    "phenotypes": ["height", "bmi"]
+  },
+
+  "stages": {
+    "grm_shards": {
+      "description": "plink --make-grm-bin --parallel i n, one shard per task",
+      "dir": "03_grm/shards",
+      "pattern": "grm_shard_{i}_of_{n_i}.grm.bin.{i}",
+      "over": {"i": "$n_shards"}
+    },
+    "relatedness": {
+      "description": "KING degree-1 classification, PO vs FS",
+      "dir": "04_relatedness/king_classification",
+      "pattern": "deg1_classified.tsv",
+      "over": {},
+      "needs": ["grm_shards"]
+    },
+    "phenotypes": {
+      "description": "residualized, inverse-normalised phenotypes",
+      "dir": "05_phenotypes/residualized",
+      "pattern": "{pheno}__{pheno_suffix}.pheno",
+      "over": {"pheno": "@phenotypes"}
+    },
+    "crossproducts": {
+      "description": "grm_class_tool accumulate, one accumulator per shard x phenotype",
+      "dir": "06_crossproducts/{pheno}",
+      "pattern": "acc.{i}.tsv",
+      "over": {"pheno": "@phenotypes", "i": "$n_shards"},
+      "needs": ["grm_shards", "phenotypes", "relatedness"]
+    },
+    "merged": {
+      "description": "grm_class_tool merge, one merged table per phenotype",
+      "dir": "06_crossproducts/{pheno}",
+      "pattern": "merged.full.tsv",
+      "over": {"pheno": "@phenotypes"},
+      "needs": ["crossproducts"]
+    }
+  }
+}

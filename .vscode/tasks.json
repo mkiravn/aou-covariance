@@ -1,0 +1,67 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "run",
+      "type": "promptString",
+      "description": "run id (runs/<id>.json)",
+      "default": "sim"
+    },
+    {
+      "id": "notebook",
+      "type": "pickString",
+      "description": "stage notebook",
+      "options": [
+        "ancestry_round1",
+        "hm3_panel",
+        "ancestry_round2",
+        "covariate_pcs",
+        "grm",
+        "phenotypes",
+        "crossproducts",
+        "curves"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "label": "setup (local)",
+      "type": "shell",
+      "command": "bash scripts/dev/setup_local.sh"
+    },
+    {
+      "label": "simulate data",
+      "type": "shell",
+      "command": ".venv/bin/python scripts/sim/simulate.py"
+    },
+    {
+      "label": "simulate + run all stages",
+      "type": "shell",
+      "command": "bash scripts/sim/run_all.sh"
+    },
+    {
+      "label": "status",
+      "type": "shell",
+      "command": ".venv/bin/python -m aoucov --run ${input:run} status",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "run notebook",
+      "type": "shell",
+      "command": ".venv/bin/python -m aoucov --run ${input:run} nb ${input:notebook}"
+    },
+    {
+      "label": "report",
+      "type": "shell",
+      "command": ".venv/bin/python -m aoucov --run ${input:run} report"
+    },
+    {
+      "label": "tests",
+      "type": "shell",
+      "command": ".venv/bin/python -m unittest discover -s aoucov/tests -t ."
+    }
+  ]
+}

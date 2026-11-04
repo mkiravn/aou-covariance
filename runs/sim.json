@@ -1,0 +1,185 @@
+{
+  "run_id": "sim",
+  "root": ".sim/runs/sim",
+  "params": {
+    "simulated": true,
+    "backend": "local",
+    "inputs": {
+      "ancestry_preds": ".sim/inputs/aux/ancestry/ancestry_preds.tsv",
+      "training_pca": ".sim/inputs/aux/ancestry/training_pca.tsv",
+      "relatedness": ".sim/inputs/aux/relatedness/samples_relatedness.tsv",
+      "acaf_bfile": ".sim/inputs/acaf/acaf_threshold.chr{chr}",
+      "ref_bfile": ".sim/inputs/reference/1kg_sim",
+      "ref_labels": ".sim/inputs/reference/1kg_sim_ped_population.txt",
+      "hm3_ids": ".sim/inputs/reference/hm3_snps.txt",
+      "phenotype_tables": ".sim/inputs/phenotypes",
+      "phenotype_list": "docs/phenotype_list.tsv",
+      "ld_regions": "resources/high_ld_regions_hg38.txt",
+      "truth": ".sim/inputs/truth.json"
+    },
+    "tools": {
+      "plink2": ".tools/bin/plink2",
+      "plink": ".tools/bin/plink",
+      "grm_class_tool": "src/grm_class_tool"
+    },
+    "threads": 4,
+    "r1_ref_pops": [
+      "CEU",
+      "GBR",
+      "FIN",
+      "TSI",
+      "IBS"
+    ],
+    "r1_n_pcs": 5,
+    "r1_width": 0.99,
+    "qc_maf": 0.01,
+    "qc_hwe": 1e-06,
+    "qc_geno": 0.05,
+    "r2_train_pops": [
+      "CEU",
+      "GBR",
+      "FIN",
+      "TSI",
+      "IBS"
+    ],
+    "r2_anchor_pops": [
+      "CEU",
+      "GBR"
+    ],
+    "r2_n_pcs_fit": 10,
+    "r2_k": 3,
+    "r2_q": 0.999,
+    "cov_n_pcs": 10,
+    "cov_r2": 0.1,
+    "cov_kin_cut": 0.1,
+    "bins": {
+      "fine": 0.001,
+      "mid": 0.005,
+      "coarse": 0.01
+    },
+    "outlier_sd": 5,
+    "seed": 1,
+    "n_shards": 4,
+    "nblocks": 20
+  },
+  "lists": {
+    "phenotypes": [
+      "height",
+      "bmi"
+    ],
+    "transforms": [
+      "raw",
+      "invnorm"
+    ],
+    "covsets": [
+      "base",
+      "base_pcs"
+    ]
+  },
+  "stages": {
+    "ancestry_round1": {
+      "description": "ellipsoid on AoU's premade PCs around a 1000G superpopulation",
+      "dir": "ancestry/round1",
+      "pattern": "keep.txt"
+    },
+    "hm3_panel": {
+      "description": "HapMap3 SNPs, QC'd in the round-1 set, matched to the reference, no A/T or C/G",
+      "dir": "panels",
+      "pattern": "hm3_round1.bed",
+      "needs": [
+        "ancestry_round1"
+      ]
+    },
+    "round2_pca": {
+      "description": "PCA on the 1000G superpopulation (bed_autoSVD), round-1 set projected by OADP",
+      "dir": "ancestry/round2",
+      "pattern": "scores.tsv",
+      "needs": [
+        "hm3_panel"
+      ]
+    },
+    "ancestry_round2": {
+      "description": "robust Mahalanobis gate around the anchor populations",
+      "dir": "ancestry/round2",
+      "pattern": "keep.txt",
+      "needs": [
+        "round2_pca"
+      ]
+    },
+    "covariate_pcs": {
+      "description": "PCs fit on the unrelated part of the final set, everyone else projected",
+      "dir": "covariates",
+      "pattern": "pcs.tsv",
+      "needs": [
+        "ancestry_round2",
+        "hm3_panel"
+      ]
+    },
+    "grm_panel": {
+      "description": "HapMap3 SNPs QC'd within the final set, ~1e6 on the Workbench",
+      "dir": "grm/input",
+      "pattern": "panel.bed",
+      "needs": [
+        "ancestry_round2"
+      ]
+    },
+    "grm_shards": {
+      "description": "plink 1.9 --make-grm-bin --parallel i n",
+      "dir": "grm/shards",
+      "pattern": "grm.shard{i}.grm.bin.{i}",
+      "over": {
+        "i": "$n_shards"
+      },
+      "needs": [
+        "grm_panel"
+      ]
+    },
+    "phenotypes": {
+      "description": "plausible range, residualise, 5 SD trim, standardise within sex",
+      "dir": "phenotypes",
+      "pattern": "{pheno}__{transform}__{covset}.pheno",
+      "over": {
+        "pheno": "@phenotypes",
+        "transform": "@transforms",
+        "covset": "@covsets"
+      },
+      "needs": [
+        "ancestry_round2",
+        "covariate_pcs"
+      ]
+    },
+    "crossproducts": {
+      "description": "grm_class_tool accumulate, all phenotype combos in one pass per shard",
+      "dir": "crossproducts/shards",
+      "pattern": "shard{i}.index.tsv",
+      "over": {
+        "i": "$n_shards"
+      },
+      "needs": [
+        "grm_shards",
+        "phenotypes"
+      ]
+    },
+    "merged": {
+      "description": "grm_class_tool merge, one table per combo",
+      "dir": "crossproducts/merged",
+      "pattern": "{pheno}__{transform}__{covset}.full.tsv",
+      "over": {
+        "pheno": "@phenotypes",
+        "transform": "@transforms",
+        "covset": "@covsets"
+      },
+      "needs": [
+        "crossproducts"
+      ]
+    },
+    "curves": {
+      "description": "binned covariance curves and the estimator ladder",
+      "dir": "curves",
+      "pattern": "estimates.tsv",
+      "needs": [
+        "merged"
+      ]
+    }
+  }
+}
