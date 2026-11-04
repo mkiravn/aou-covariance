@@ -6,9 +6,13 @@ matrix.
 Writes into <out_dir>:
   test.grm.bin, test.grm.id, test.pheno, test.bins, test.classes.tsv,
   shard.<k>            (k = 1..n_shards)
-  expected.tsv         (class, bin_index, sum, sum_sq, n) -- the reference
+  expected.tsv         (class, bin_index, sum, sum_sq, n, n_indiv) -- the reference;
+                       n_indiv is distinct people, capped at 21 like the tool
 
-Usage: make_test_data.py <out_dir> [n_ids] [n_shards]
+Usage: make_test_data.py <out_dir> [n_ids] [n_shards] [noise_sd]
+
+A larger noise_sd spills unrelated pairs into the 0.05-0.20 bin; tuned so that
+bin holds roughly 21 people, it tests the cap on n_indiv across shards.
 """
 import math
 import os
@@ -18,6 +22,7 @@ import numpy as np
 
 N_DEFAULT = 60
 SHARDS_DEFAULT = 5
+INDIV_CAP = 21        # grm_class_tool.cpp
 
 
 def triangle_divide_off_diag(target: int) -> int:
@@ -49,12 +54,13 @@ def main() -> None:
     out = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else N_DEFAULT
     n_shards = int(sys.argv[3]) if len(sys.argv) > 3 else SHARDS_DEFAULT
+    noise_sd = float(sys.argv[4]) if len(sys.argv) > 4 else 0.01
     os.makedirs(out, exist_ok=True)
 
     rng = np.random.default_rng(0)
 
     # symmetric relatedness: unrelated noise plus injected related pairs
-    A = rng.normal(0.0, 0.01, size=(n, n))
+    A = rng.normal(0.0, noise_sd, size=(n, n))
     A = (A + A.T) / 2.0
     np.fill_diagonal(A, 1.0)
 
@@ -158,6 +164,7 @@ def main() -> None:
 
     # reference: iterate the whole lower triangle exactly as the tool does
     acc = {}
+    people = {}
     for i in range(n):
         for j in range(i):
             yi, yj = y_use[i], y_use[j]
@@ -171,11 +178,18 @@ def main() -> None:
             prod = float(yi) * float(yj)
             s, sq, cnt = acc.get((cls, k), (0.0, 0.0, 0))
             acc[(cls, k)] = (s + prod, sq + prod * prod, cnt + 1)
+            people.setdefault((cls, k), set()).update((i, j))
 
     with open(f"{out}/expected.tsv", "w") as f:
-        f.write("class\tbin_index\tsum\tsum_sq\tn\n")
+        f.write("class\tbin_index\tsum\tsum_sq\tn\tn_indiv\n")
         for (cls, k), (s, sq, cnt) in sorted(acc.items()):
-            f.write(f"{cls}\t{k}\t{s:.17g}\t{sq:.17g}\t{cnt}\n")
+            ni = min(len(people[(cls, k)]), INDIV_CAP)
+            f.write(f"{cls}\t{k}\t{s:.17g}\t{sq:.17g}\t{cnt}\t{ni}\n")
+        # pooled: people over all classes, so it can't be summed from the rows
+        for k in sorted({k for _, k in people}):
+            ni = min(len(set().union(*(v for (c, kk), v in people.items() if kk == k))),
+                     INDIV_CAP)
+            f.write(f"pooled_indiv\t{k}\t0\t0\t0\t{ni}\n")
 
     print(f"n_ids={n} n_shards={n_shards} bins={len(bins)}")
     print(f"shard row starts: {starts}")

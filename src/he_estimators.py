@@ -190,6 +190,42 @@ def load_arrays(full_path, jk_path, nbins, nblocks):
     return S, N
 
 
+# AoU Data and Statistics Dissemination Policy: nothing shown may rest on 1-20
+# participants. A bin's pair count does not settle that (50 pairs can come from
+# 11 people), so `grm_class_tool merge` writes n_indiv = min(distinct people in
+# the bin, 21). Merges from before that column existed fall back to the pair
+# count: 21 people make at most 210 pairs, so 210 pairs need at least 21 people.
+MIN_PEOPLE = 21
+MIN_PAIRS_NO_PEOPLE = MIN_PEOPLE * (MIN_PEOPLE - 1) // 2
+
+
+def load_people(full_path, nbins):
+    """n_indiv per (class, bin), shape (len(CLS), nbins), 0 where a class has no
+    pairs in a bin. None if the merge did not record people (older tool, or any
+    shard accumulated by one), in which case `enough_people` uses pair counts."""
+    f = pd.read_csv(full_path, sep="\t")
+    if "n_indiv" not in f.columns or f["n_indiv"].isna().any():
+        return None
+    P = np.zeros((len(CLS), nbins))
+    for ci, c in enumerate(CLS):
+        fc = f[f["class"] == c]
+        P[ci, fc["bin_index"].to_numpy() - 1] = fc["n_indiv"].to_numpy()
+    return P
+
+
+def enough_people(P, N, classes):
+    """Per bin, True only where the class set provably rests on >= MIN_PEOPLE
+    people. Aligned with `bin_curve`'s output (the bins the set populates).
+
+    People in a class set are at least the most in any one of its classes,
+    which is exact whenever one class (in practice `other`) clears the bar on
+    its own. With P None, falls back to >= MIN_PAIRS_NO_PEOPLE pairs."""
+    ci = [CLS.index(c) for c in classes]
+    n = N[0, ci].sum(0)
+    ok = (P[ci].max(0) >= MIN_PEOPLE) if P is not None else (n >= MIN_PAIRS_NO_PEOPLE)
+    return ok[n > 0]
+
+
 def _ind(a, lo, hi):
     return ((a >= lo) & (a < hi)).astype(float)
 

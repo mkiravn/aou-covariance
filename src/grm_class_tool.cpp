@@ -43,6 +43,41 @@
 static const char* OTHER_CLASS = "other";
 
 // ---------------------------------------------------------------------------
+// Distinct individuals per bin, capped
+//
+// AoU's dissemination policy forbids showing anything that rests on 1-20
+// participants. A bin's pair count does not say how many people are behind it
+// (50 pairs can come from 11 people), so each (class, bin, phenotype) also
+// keeps the first INDIV_CAP distinct row indices it sees. That is enough to
+// decide "more than 20 people or not" exactly, and it merges exactly: the
+// union of capped sets, capped again, is min(true distinct count, INDIV_CAP)
+// -- if the union is short of the cap, every input set was short of it too,
+// so none of them dropped anyone.
+//
+// n_indiv in the merged output is therefore min(distinct people, 21): 21
+// means "more than 20", anything lower is the exact count and must not be
+// shown. Memory is ncls * nbins * K * 21 * 4 bytes (~1.4 MB for K=36).
+// ---------------------------------------------------------------------------
+
+static const std::size_t INDIV_CAP = 21;
+
+struct IndivSet {
+    std::uint32_t id[INDIV_CAP];
+    std::uint8_t n = 0;
+
+    bool full() const { return n >= INDIV_CAP; }
+    void insert(std::uint32_t x) {
+        if (full()) return;
+        for (std::uint8_t t = 0; t < n; ++t)
+            if (id[t] == x) return;
+        id[n++] = x;
+    }
+    void insert(const IndivSet& o) {
+        for (std::uint8_t t = 0; t < o.n && !full(); ++t) insert(o.id[t]);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Progress reporting
 // ---------------------------------------------------------------------------
 
@@ -567,6 +602,7 @@ static int run_accumulate(int argc, char** argv) {
     const std::size_t nblk = static_cast<std::size_t>(args.nblocks);
     std::vector<Acc> acc_full(ncls * nbins * K);
     std::vector<Acc> acc_drop(ncls * nblk * nbins * K);
+    std::vector<IndivSet> indiv(ncls * nbins * K);   // indexed like acc_full
     std::vector<std::uint64_t> class_hits(K * ncls, 0);
     auto FI = [&](std::size_t c, std::size_t k) { return (c * nbins + k) * K; };
     auto DI = [&](std::size_t c, std::size_t b, std::size_t k) {
@@ -607,6 +643,7 @@ static int run_accumulate(int argc, char** argv) {
             const double* yj_row = &y[j * K];
             const int bj = block_of[j];
             Acc* f = &acc_full[FI(cls, k)];
+            IndivSet* who = &indiv[FI(cls, k)];
             Acc* d1 = &acc_drop[DI(cls, static_cast<std::size_t>(bi), k)];
             Acc* d2 = (bj != bi) ? &acc_drop[DI(cls, static_cast<std::size_t>(bj), k)] : nullptr;
             std::uint64_t* hits = &class_hits[cls];
@@ -619,6 +656,10 @@ static int run_accumulate(int argc, char** argv) {
                 d1[p].add(prod);
                 if (d2) d2[p].add(prod);
                 hits[p * ncls] += 1;
+                if (!who[p].full()) {   // one byte compare once the bin has 21 people
+                    who[p].insert(static_cast<std::uint32_t>(i));
+                    who[p].insert(static_cast<std::uint32_t>(j));
+                }
             }
         }
         entries_done += i + 1;
@@ -631,21 +672,26 @@ static int run_accumulate(int argc, char** argv) {
             args.pheno.empty() ? substitute_name(args.out_pattern, specs[p].name) : args.out;
         std::ofstream out(out_path);
         if (!out) throw std::runtime_error("Could not open output file: " + out_path);
-        out << "class\tscope\tblock\tbin_index\tsum\tsum_sq\tn\n";
+        // `indiv` holds up to INDIV_CAP .grm.id row indices (not person_ids),
+        // comma-separated, on full rows only; "." on drop rows.
+        out << "class\tscope\tblock\tbin_index\tsum\tsum_sq\tn\tindiv\n";
         out.precision(17);
         for (std::size_t c = 0; c < ncls; ++c) {
             for (std::size_t k = 0; k < nbins; ++k) {
                 const Acc& a = acc_full[FI(c, k) + p];
                 if (a.n == 0) continue;
                 out << pc.names[c] << "\tfull\t-1\t" << k << '\t' << a.sum << '\t' << a.sum_sq
-                    << '\t' << a.n << '\n';
+                    << '\t' << a.n << '\t';
+                const IndivSet& s = indiv[FI(c, k) + p];
+                for (std::uint8_t t = 0; t < s.n; ++t) out << (t ? "," : "") << s.id[t];
+                out << '\n';
             }
             for (std::size_t b = 0; b < nblk; ++b) {
                 for (std::size_t k = 0; k < nbins; ++k) {
                     const Acc& a = acc_drop[DI(c, b, k) + p];
                     if (a.n == 0) continue;
                     out << pc.names[c] << "\tdrop\t" << b << '\t' << k << '\t' << a.sum << '\t'
-                        << a.sum_sq << '\t' << a.n << '\n';
+                        << a.sum_sq << '\t' << a.n << "\t.\n";
                 }
             }
         }
@@ -749,11 +795,17 @@ static int run_merge(int argc, char** argv) {
 
     std::map<std::string, std::vector<Acc>> full;
     std::map<std::string, std::vector<std::vector<Acc>>> drop;
+    std::map<std::string, std::vector<IndivSet>> indiv;
+    // Accumulators written before the `indiv` column existed cannot say how
+    // many people a bin holds. One such file makes every n_indiv NA, never a
+    // number that silently undercounts.
+    bool have_indiv = true;
 
     auto ensure_class = [&](const std::string& c) {
         if (!full.count(c)) {
             full[c] = std::vector<Acc>(nbins);
             drop[c] = std::vector<std::vector<Acc>>(args.nblocks, std::vector<Acc>(nbins));
+            indiv[c] = std::vector<IndivSet>(nbins);
         }
     };
 
@@ -769,6 +821,12 @@ static int run_merge(int argc, char** argv) {
 
         std::string line;
         std::getline(in, line);  // header
+        const bool file_has_indiv = line.find("\tindiv") != std::string::npos;
+        if (!file_has_indiv && have_indiv) {
+            std::cerr << "[WARN] " << acc_path << " has no indiv column (accumulated by an "
+                         "older grm_class_tool) -- n_indiv will be NA for every bin\n";
+            have_indiv = false;
+        }
         while (std::getline(in, line)) {
             if (line.empty()) continue;
             std::istringstream iss(line);
@@ -777,6 +835,10 @@ static int run_merge(int argc, char** argv) {
             double sum, sum_sq;
             uint64_t n;
             if (!(iss >> cls >> scope >> block >> bin_index >> sum >> sum_sq >> n)) continue;
+            std::string who;
+            if (file_has_indiv && !(iss >> who)) {
+                throw std::runtime_error("Row without an indiv field in " + acc_path);
+            }
 
             if (bin_index < 0 || bin_index >= nbins) {
                 throw std::runtime_error("Bin index out of range in " + acc_path +
@@ -786,6 +848,13 @@ static int run_merge(int argc, char** argv) {
             Acc piece{sum, sum_sq, n};
             if (scope == "full") {
                 full[cls][bin_index].add(piece);
+                if (file_has_indiv) {
+                    IndivSet& s = indiv[cls][bin_index];
+                    std::istringstream ws(who);
+                    std::string tok;
+                    while (!s.full() && std::getline(ws, tok, ','))
+                        s.insert(static_cast<std::uint32_t>(std::stoul(tok)));
+                }
             } else if (scope == "drop") {
                 if (block < 0 || block >= args.nblocks) {
                     throw std::runtime_error("Block index out of range in " + acc_path +
@@ -805,6 +874,10 @@ static int run_merge(int argc, char** argv) {
         if (kv.first == "pooled") continue;
         for (int k = 0; k < nbins; ++k) full["pooled"][k].add(kv.second[k]);
     }
+    for (const auto& kv : indiv) {
+        if (kv.first == "pooled") continue;
+        for (int k = 0; k < nbins; ++k) indiv["pooled"][k].insert(kv.second[k]);
+    }
     for (const auto& kv : drop) {
         if (kv.first == "pooled") continue;
         for (int b = 0; b < args.nblocks; ++b)
@@ -814,7 +887,7 @@ static int run_merge(int argc, char** argv) {
     std::ofstream out_full(args.out_prefix + ".full.tsv");
     std::ofstream out_jk(args.out_prefix + ".jk.tsv");
     out_full << "class\tbin_index\tbin_left\tbin_right\tbin_midpoint\tfull_sum\tfull_sum_sq\t"
-                "full_n\tfull_mean\tfull_sd\tfull_se\tjk_mean\tjk_var\tjk_se\n";
+                "full_n\tfull_mean\tfull_sd\tfull_se\tjk_mean\tjk_var\tjk_se\tn_indiv\n";
     out_jk << "class\tblock\tbin_index\tbin_left\tbin_right\tbin_midpoint\tjk_sum\tjk_sum_sq\t"
               "jk_n\tjk_mean\tjk_sd\tjk_se\n";
     out_full.precision(17);
@@ -833,7 +906,9 @@ static int run_merge(int argc, char** argv) {
                      << safe_mean(full[cls][k].sum, full[cls][k].n) << '\t'
                      << safe_sample_sd(full[cls][k].sum, full[cls][k].sum_sq, full[cls][k].n) << '\t'
                      << safe_se_of_mean(full[cls][k].sum, full[cls][k].sum_sq, full[cls][k].n)
-                     << '\t' << jk_mean << '\t' << jk_var << '\t' << jk_se << '\n';
+                     << '\t' << jk_mean << '\t' << jk_var << '\t' << jk_se << '\t';
+            if (have_indiv) out_full << static_cast<int>(indiv[cls][k].n) << '\n';
+            else out_full << "NA\n";
         }
         for (int b = 0; b < args.nblocks; ++b) {
             for (int k = 0; k < nbins; ++k) {

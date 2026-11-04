@@ -111,8 +111,20 @@ index internally. Reversed duplicates are counted and ignored.
 
 ```
 class  bin_index  bin_left  bin_right  bin_midpoint  full_sum  full_sum_sq
-full_n  full_mean  full_sd  full_se  jk_mean  jk_var  jk_se
+full_n  full_mean  full_sd  full_se  jk_mean  jk_var  jk_se  n_indiv
 ```
+
+`n_indiv` is the number of distinct people behind the bin, **capped at 21**:
+21 means "more than 20", anything lower is exact. It exists for AoU's
+dissemination policy (nothing shown may rest on 1–20 participants), which a
+pair count can't settle: 50 pairs can come from 11 people. Each accumulator
+keeps the first 21 distinct `.grm.id` row indices per (class, bin, phenotype)
+in an `indiv` column. These are row numbers, not person_ids, and they stay
+inside the Workbench like the rest of the accumulator. `merge` takes their
+union, capped again, which is exact for the >20 question across any number of
+shards. If any accumulator predates the column, every `n_indiv` is `NA`.
+Downstream, `he_estimators.enough_people` then falls back to ≥ 210 pairs
+(21 people make at most 210 pairs).
 
 `<prefix>.jk.tsv` — per `(class, block, bin)` delete-block values.
 
