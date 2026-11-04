@@ -9,7 +9,7 @@ with the existing CEU/GBR pipeline (`notebooks/01–12`, run id `1kg_eur`).
 | requirement | mechanism |
 |---|---|
 | reports results and figures | every stage writes figures + an aggregate summary to `{root}/report/{stage}/` through one helper that enforces AoU's no-counts-of-1–20 rule; `python -m aoucov --run X report` assembles `RESULTS.md` |
-| code visible and editable | stage notebooks are plain `.ipynb` in git (nbstripout on); heavy steps are short shell/R scripts in `scripts/batch/` that dsub runs; nothing important lives only inside a notebook cell |
+| code visible and editable | each stage notebook holds all of its analysis code: Python functions at the top, plink as `%%bash` cells, bigsnpr as `%%script Rscript` cells. Only plumbing (`aoucov`) and code shared with CEU/GBR (`residualize_lib.R`, `he_estimators.py`, `grm_class_tool`) live elsewhere |
 | aware of input and output | `aoucov` (already drafted, untracked): a committed run config declares each stage's outputs and `needs`; `python -m aoucov --run X status` shows done/missing/blocked; each output gets a `.meta.json` sidecar with git SHA, config hash, machine |
 | documented on GitHub | repo holds code, configs, this doc, per-stage READMEs; results reach GitHub only after you review the downloaded `report/` |
 | AoU best practice | compute stays in the workbench; Batch via dsub with the known pet-SA/private-network config; CDR-provided resources used where they exist (premade PCs, ACAF callset, relatedness table); CDR version pinned in config; count suppression built into reporting |
@@ -23,10 +23,7 @@ they still hold: the gates are interactive, and dsub already works.
 ```
 aoucov/                 run bookkeeping (exists): config, store, manifest, provenance, runner
   report.py             NEW  figures/tables/summary with count suppression
-  batch.py              NEW  one dsub command builder (SA, network, cloud-sdk tag patch)
 src/
-  ancestry.py           NEW  Mahalanobis gate, radius-by-coverage, ellipse plotting
-                             (lifted from notebooks/01_round1_gate.ipynb, which stays as is)
   grm_class_tool.cpp, he_estimators.py, covplot.py, make_bins.py   (unchanged)
 resources/              NEW  committed, public, non-participant files
   high_ld_regions_hg38.txt   was inlined in 02_round2_gate
@@ -34,7 +31,7 @@ runs/
   1kg_eur.json          exists, describes the finished CEU/GBR run
   eur.json  afr.json  eas.json  sas.json      NEW, one per target population
 aucov_across_pops/      NEW  stage notebooks, named by stage id, parametrised by RUN_ID
-scripts/batch/          NEW  the commands dsub runs (plink, bigsnpr R, grm_class_tool)
+scripts/sim/, scripts/dev/   simulator, run-all, local setup
 notebooks/              the 1kg_eur record; not edited
 ```
 
@@ -83,7 +80,7 @@ Every stage reads only what `needs` names and writes only under its own `dir`.
 
 ### 1. `ancestry_round1`: premade PCs, ellipsoid around a 1000G superpopulation
 - **In:** `ancestry_preds.tsv` (16 PCs per participant), `training_pca.tsv` (reference panel in the same space), 1000G/HGDP labels.
-- **Method:** `01_round1_gate`'s code, moved into `src/ancestry.py`. MVN fit to the founders of `r1_ref_pops` on the first `r1_n_pcs` PCs; radius = the `r1_width` quantile of the founders' own distances.
+- **Method:** `01_round1_gate`'s code, copied into the notebook. MVN fit to the founders of `r1_ref_pops` on the first `r1_n_pcs` PCs; radius = the `r1_width` quantile of the founders' own distances.
 - **Out:** keep list. **Report:** kept-N vs coverage curve (a plateau means a cluster, steady growth means an admixture continuum), gate in PC space, kinship-class counts inside the gate.
 - Same code for every superpopulation, so `1kg_eur` round 1 and the new runs can't drift apart.
 
@@ -136,7 +133,6 @@ The paper removes relatives only from the set used to **fit** PCs, so that proje
 ## Things to fix in passing (not blocking)
 
 - **Coverage quantiles above ~0.99 aren't estimable from the anchor.** `02_round2_gate` used `COVERAGE = 0.999` on CEU+GBR, about 190 samples, which is effectively the anchor's maximum distance. For the new runs, set the radius from χ²_K of the robust fit, or report it as a radius with the coverage curve beside it.
-- The Batch boilerplate (SA, network, cloud-sdk tag patch) is copy-pasted into five notebooks. `aoucov/batch.py` holds it once.
 
 ## Reporting and GitHub
 

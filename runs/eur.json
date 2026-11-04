@@ -3,7 +3,6 @@
   "root": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/eur",
   "params": {
     "simulated": false,
-    "backend": "dsub",
     "inputs": {
       "ancestry_preds": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv",
       "training_pca": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/training_pca.tsv",

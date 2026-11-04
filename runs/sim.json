@@ -3,7 +3,6 @@
   "root": ".sim/runs/sim",
   "params": {
     "simulated": true,
-    "backend": "local",
     "inputs": {
       "ancestry_preds": ".sim/inputs/aux/ancestry/ancestry_preds.tsv",
       "training_pca": ".sim/inputs/aux/ancestry/training_pca.tsv",

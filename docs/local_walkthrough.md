@@ -42,5 +42,5 @@ set `r2_k` and `r2_q` in `runs/sim.json`, rerun. A finished output is kept on re
 
 ## On the Workbench
 
-Same notebooks with `RUN_ID = "eur"`. Fill the `TODO` inputs in `runs/eur.json`. `backend: "dsub"` isn't wired yet, so heavy
-stages are still submitted with the existing dsub cells.
+Same notebooks with `RUN_ID = "eur"`. Fill the `TODO` inputs in `runs/eur.json`. The `%%bash` and R cells
+run on the VM; at full scale the panel and GRM-shard cells need Batch (dsub), which isn't wired yet.
