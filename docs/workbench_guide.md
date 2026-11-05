@@ -46,6 +46,20 @@ python -m aoucov --run uniform_10k sync' > ~/uniform_10k.log 2>&1 &
 It needs `chb_chs`'s `hm3_overlap` first. A GRM in a mixed sample carries ancestry structure: on simulated data
 12% of pairs fell outside the bins (−0.05 to 1.5) and the h2 checks don't apply.
 
+## Even sample (`even_10k`)
+
+Same as `uniform_10k`, but `even_sample` draws with probability ∝ 1/density, where density is the k-nearest-
+neighbour density (`even_k`, 20) in AoU's premade PCs 1–`even_n_pcs` (4). The sample is spread evenly over the
+occupied PC space instead of mirroring the cohort, so admixed and rare ancestries are up-weighted. It reports
+how much more even it is than a random sample of the same size, and the ancestry mix of both. Run it like
+`uniform_10k`, with `even_sample` first:
+
+```bash
+nohup bash -c 'for nb in even_sample hm3_panel ancestry_round2 covariate_pcs grm; do
+  python -m aoucov --run even_10k nb $nb || break; done
+python -m aoucov --run even_10k sync' > ~/even_10k.log 2>&1 &
+```
+
 ## A new target population
 
 On your laptop, not the VM (the VM never pushes):

@@ -1,0 +1,175 @@
+{
+  "run_id": "even_10k",
+  "root": "~/aucov_runs/even_10k",
+  "params": {
+    "simulated": false,
+    "mirror": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/even_10k",
+    "scratch": "~/aucov_scratch",
+    "inputs": {
+      "ancestry_preds": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv",
+      "training_pca": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/training_pca.tsv",
+      "relatedness": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/relatedness/samples_relatedness.tsv",
+      "acaf_pfile": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
+      "ref_bfile": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/1000g_reference/1kg_all_qc",
+      "ref_labels": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/reference_labels/20130606_g1k_3202_samples_ped_population.txt",
+      "hm3_ids": "~/aucov_runs/chb_chs/diagnostics/hm3_ids_matched.txt",
+      "phenotype_tables": "TODO: folder of {phenotype}.tsv (person_id, phenotype, age, sex_at_birth) pulled for the whole cohort",
+      "phenotype_list": "docs/phenotype_list.tsv",
+      "ld_regions": "resources/high_ld_regions_hg38.txt",
+      "hm3_rsids": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/1000g_reference/hm3.snplist",
+      "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1"
+    },
+    "tools": {
+      "plink2": "~/bin/plink2",
+      "plink": "~/bin/plink",
+      "grm_class_tool": "src/grm_class_tool"
+    },
+    "threads": 62,
+    "qc_maf": 0.01,
+    "qc_hwe": 1e-06,
+    "qc_geno": 0.05,
+    "cov_n_pcs": 10,
+    "cov_r2": 0.1,
+    "cov_kin_cut": 0.1,
+    "bins": {
+      "fine": 0.001,
+      "mid": 0.005,
+      "coarse": 0.01
+    },
+    "outlier_sd": 5,
+    "seed": 1,
+    "n_shards": 4,
+    "nblocks": 50,
+    "billing_project": "wb-swift-sprout-7231",
+    "uniform_n": 10000,
+    "superpop": "ALL",
+    "r2_n_pcs_fit": 10,
+    "even_n_pcs": 4,
+    "even_k": 20
+  },
+  "lists": {
+    "phenotypes": [
+      "height",
+      "bmi"
+    ],
+    "transforms": [
+      "raw",
+      "invnorm"
+    ],
+    "covsets": [
+      "base",
+      "base_pcs"
+    ]
+  },
+  "stages": {
+    "ancestry_round1": {
+      "description": "inverse-density sample of 10000, even across AoU's premade PCs 1-4 (even_sample notebook)",
+      "dir": "ancestry/round1",
+      "pattern": "keep.txt"
+    },
+    "hm3_panel": {
+      "description": "HapMap3 SNPs, QC'd in the round-1 set, matched to the reference, no A/T or C/G",
+      "dir": "panels",
+      "pattern": "hm3_round1.bed",
+      "needs": [
+        "ancestry_round1"
+      ]
+    },
+    "round2_pca": {
+      "description": "PCA on all of 1000G (bed_autoSVD), uniform sample projected by OADP; no gate",
+      "dir": "ancestry/round2",
+      "pattern": "scores.tsv",
+      "needs": [
+        "hm3_panel"
+      ]
+    },
+    "ancestry_round2": {
+      "description": "same list as ancestry_round1: no ancestry gate (written by even_sample)",
+      "dir": "ancestry/round2",
+      "pattern": "keep.txt",
+      "needs": [
+        "ancestry_round1"
+      ]
+    },
+    "covariate_pcs": {
+      "description": "PCs fit on the unrelated part of the final set, everyone else projected",
+      "dir": "covariates",
+      "pattern": "pcs.tsv",
+      "needs": [
+        "ancestry_round2",
+        "hm3_panel"
+      ]
+    },
+    "grm_panel": {
+      "description": "HapMap3 SNPs QC'd within the final set, ~1e6 on the Workbench",
+      "dir": "grm/input",
+      "pattern": "panel.bed",
+      "needs": [
+        "ancestry_round2"
+      ]
+    },
+    "grm_shards": {
+      "description": "plink 1.9 --make-grm-bin --parallel i n",
+      "dir": "grm/shards",
+      "pattern": "grm.shard{i}.grm.bin.{i}",
+      "over": {
+        "i": "$n_shards"
+      },
+      "needs": [
+        "grm_panel"
+      ]
+    },
+    "phenotypes": {
+      "description": "plausible range, residualise, 5 SD trim, standardise within sex",
+      "dir": "phenotypes",
+      "pattern": "{pheno}__{transform}__{covset}.pheno",
+      "over": {
+        "pheno": "@phenotypes",
+        "transform": "@transforms",
+        "covset": "@covsets"
+      },
+      "needs": [
+        "ancestry_round2",
+        "covariate_pcs"
+      ]
+    },
+    "crossproducts": {
+      "description": "grm_class_tool accumulate, all phenotype combos in one pass per shard",
+      "dir": "crossproducts/shards",
+      "pattern": "shard{i}.index.tsv",
+      "over": {
+        "i": "$n_shards"
+      },
+      "needs": [
+        "grm_shards",
+        "phenotypes"
+      ]
+    },
+    "merged": {
+      "description": "grm_class_tool merge, one table per combo",
+      "dir": "crossproducts/merged",
+      "pattern": "{pheno}__{transform}__{covset}.full.tsv",
+      "over": {
+        "pheno": "@phenotypes",
+        "transform": "@transforms",
+        "covset": "@covsets"
+      },
+      "needs": [
+        "crossproducts"
+      ]
+    },
+    "curves": {
+      "description": "binned covariance curves and the estimator ladder",
+      "dir": "curves",
+      "pattern": "estimates.tsv",
+      "needs": [
+        "merged"
+      ]
+    },
+    "hm3_overlap": {
+      "description": "diagnostic: HapMap3 from the rsID list to the QC'd panel, step by step",
+      "dir": "diagnostics",
+      "pattern": "hm3_overlap.tsv"
+    }
+  }
+}
