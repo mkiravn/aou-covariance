@@ -1,7 +1,7 @@
 # Running aucov_across_pops on the Workbench
 
 One run = one target population = one config, `runs/<target>.json`, named by its 1000G populations
-(`ceu_gbr`, `chb_jpt`, `yri`). `superpop` sets round 1 and round 2's PCA; `target_pops` sets round 2's gate.
+(`ceu_gbr`, `chb_chs`, `stu_itu_beb`). `superpop` sets round 1 and round 2's PCA; `target_pops` sets round 2's gate.
 
 ## Once
 
@@ -20,31 +20,30 @@ One run = one target population = one config, `runs/<target>.json`, named by its
 
 ## Runs that exist
 
-One per superpopulation:
-
 | run | `superpop` | `target_pops` | 1000G people (2,504 set) |
 |---|---|---|---|
 | `ceu_gbr` | EUR | CEU+GBR | 99 + 91 |
-| `chb_jpt` | EAS | CHB+JPT | 103 + 104 |
+| `chb_chs` | EAS | CHB+CHS | 103 + 105 |
 | `yri` | AFR | YRI | 108 |
-| `gih` | SAS | GIH | 103 |
-| `mxl` | AMR | MXL | 64 |
+| `lwk` | AFR | LWK | 99 |
+| `stu_itu_beb` | SAS | STU+ITU+BEB | 102 + 102 + 86 |
 
-`r2_k = 4`, `r2_q = 0.999` are provisional in all of them: set them from the round-2 diagnostics. AMR is admixed
-throughout, so `mxl`'s round 1 is wide. Alternatives: ASW (AFR, African American), PUR (AMR), PJL or ITU (SAS).
+`ceu_gbr` also holds `hm3_overlap`'s shared SNP list. `yri` and `lwk` share round 1 (same `superpop`), so
+their round-1 output is identical. `r2_k = 4`, `r2_q = 0.999` are provisional in all of them: set them from the
+round-2 diagnostics.
 
 ## A new target population
 
 On your laptop, not the VM (the VM never pushes):
 
 ```bash
-cp runs/ceu_gbr.json runs/chb_jpt.json
+cp runs/ceu_gbr.json runs/pur.json
 ```
 
-Edit `run_id`, `root`, `mirror`, `superpop` (`EAS`), `target_pops` (`["CHB", "JPT"]`). `hm3_ids` can keep pointing at `ceu_gbr`'s file: it doesn't depend on the population. Then:
+Edit `run_id`, `root`, `mirror`, `superpop` (`AMR`), `target_pops` (`["PUR"]`). `hm3_ids` can keep pointing at `ceu_gbr`'s file: it doesn't depend on the population. Then:
 
 ```bash
-git add runs/chb_jpt.json && git commit -m "Run config: CHB+JPT" && git tag run-chb_jpt-v1 && git push --tags origin HEAD
+git add runs/pur.json && git commit -m "Run config: PUR" && git tag run-pur-v1 && git push --tags origin HEAD
 ```
 
 On the VM: `cd ~/aou-covariance && git pull`.
@@ -54,21 +53,21 @@ On the VM: `cd ~/aou-covariance && git pull`.
 Short stages can run straight in the terminal:
 
 ```bash
-python -m aoucov --run chb_jpt nb ancestry_round1
-python -m aoucov --run chb_jpt sync
+python -m aoucov --run chb_chs nb ancestry_round1
+python -m aoucov --run chb_chs sync
 ```
 
 Long ones (`hm3_overlap`, `hm3_panel`, `covariate_pcs`, `grm`) should survive a closed browser tab. The VM has no
 `tmux`, so use `nohup` and follow the log:
 
 ```bash
-nohup python -m aoucov --run chb_jpt nb hm3_panel > ~/hm3_panel.chb_jpt.log 2>&1 &
-tail -f ~/hm3_panel.chb_jpt.log
+nohup python -m aoucov --run chb_chs nb hm3_panel > ~/hm3_panel.chb_chs.log 2>&1 &
+tail -f ~/hm3_panel.chb_chs.log
 ```
 
 The executed notebook, with outputs, is in
-`~/aucov_runs/chb_jpt/notebooks/`; open it in JupyterLab to look at the figures and checks.
-`python -m aoucov --run chb_jpt status` shows what's done (`ok`), partial (`**`), missing (`--`) or stale (`~~`).
+`~/aucov_runs/chb_chs/notebooks/`; open it in JupyterLab to look at the figures and checks.
+`python -m aoucov --run chb_chs status` shows what's done (`ok`), partial (`**`), missing (`--`) or stale (`~~`).
 
 ## Order, and what to look at
 
@@ -91,7 +90,7 @@ The configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop
 
 ```bash
 nohup bash -c 'python -m aoucov --run ceu_gbr nb hm3_overlap   # once, writes the shared hm3_ids
-for run in ceu_gbr chb_jpt yri gih mxl; do
+for run in ceu_gbr chb_chs yri lwk stu_itu_beb; do
   for nb in ancestry_round1 hm3_panel ancestry_round2; do python -m aoucov --run $run nb $nb || break; done
   python -m aoucov --run $run sync
 done' > ~/ancestry.log 2>&1 &
@@ -104,10 +103,10 @@ kept-vs-`q` table in each run's `round2_pca` and `ancestry_round2` reports.
 ## Taking results out
 
 ```bash
-python -m aoucov --run chb_jpt report
+python -m aoucov --run chb_chs report
 ```
 
-writes `~/aucov_runs/chb_jpt/report/RESULTS.md`: aggregate counts (1–20 masked), checks, parameters and the
+writes `~/aucov_runs/chb_chs/report/RESULTS.md`: aggregate counts (1–20 masked), checks, parameters and the
 commit. Review it and the figures before they leave the Workbench. Executed notebooks and anything per-person
 stay in the bucket.
 

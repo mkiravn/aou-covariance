@@ -29,7 +29,7 @@ resources/              NEW  committed, public, non-participant files
   high_ld_regions_hg38.txt   was inlined in 02_round2_gate
 runs/
   1kg_eur.json          exists, describes the finished CEU/GBR run
-  ceu_gbr.json  chb_jpt.json  yri.json …   NEW, one per target population, named by its 1000G pops
+  ceu_gbr  chb_chs  yri  lwk  stu_itu_beb  …   NEW, one per target population, named by its 1000G pops
 aucov_across_pops/      NEW  stage notebooks, named by stage id, parametrised by RUN_ID
 scripts/sim/, scripts/dev/   simulator, run-all, local setup
 notebooks/              the 1kg_eur record; not edited
@@ -45,7 +45,7 @@ rep = Report(cfg, "ancestry_round2")
 
 Run each notebook interactively the first time. Decisions you make by eye (K, radius,
 which PCs are LD artefacts) go into the run config, not into a cell. After that,
-`python -m aoucov --run chb_jpt nb X` re-executes a stage for another
+`python -m aoucov --run chb_chs nb X` re-executes a stage for another
 population, and the executed copy, with outputs, lands in the bucket next to the
 report. The repo copy stays output-free.
 
@@ -144,7 +144,7 @@ The paper removes relatives only from the set used to **fit** PCs, so that proje
 
 ## Open decisions
 
-1. **Round-2 anchors** per population: CEU+GBR for EUR as before? YRI(+ESN) for AFR, CHB+JPT for EAS, GIH/PJL for SAS? Most AoU African-ancestry participants sit on an admixture cline, so the AFR round-1 gate may hold few people. The curve in stage 1 will show it.
+1. **Round-2 targets** (decided 2026-11-05): CEU+GBR, CHB+CHS, YRI, LWK, STU+ITU+BEB. Most AoU African-ancestry participants sit on an admixture cline, so the AFR round-1 gate may hold few people. The curve in stage 1 will show it.
 2. **GRM variant set:** HM3-only (~1.0M) for the new runs, against `1kg_eur`'s ~1.69M. Keep the difference, or rebuild `1kg_eur`'s GRM on HM3 so all runs match?
 3. **Covariate PCA fit set:** (a) or (b) above.
 4. **IBD:** is there a phased callset, and is phasing in scope if not?

@@ -1,9 +1,9 @@
 {
-  "run_id": "gih",
-  "root": "~/aucov_runs/gih",
+  "run_id": "lwk",
+  "root": "~/aucov_runs/lwk",
   "params": {
     "simulated": false,
-    "mirror": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/gih",
+    "mirror": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/lwk",
     "scratch": "~/aucov_scratch",
     "inputs": {
       "ancestry_preds": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv",
@@ -25,13 +25,13 @@
       "grm_class_tool": "src/grm_class_tool"
     },
     "threads": 62,
-    "superpop": "SAS",
+    "superpop": "AFR",
     "r1_n_pcs": 5,
     "r1_width": 0.99,
     "qc_maf": 0.01,
     "qc_hwe": 1e-06,
     "qc_geno": 0.05,
-    "target_pops": ["GIH"],
+    "target_pops": ["LWK"],
     "r2_n_pcs_fit": 10,
     "r2_k": 4,
     "r2_q": 0.999,
