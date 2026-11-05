@@ -70,7 +70,7 @@ def main(argv=None) -> int:
 
     sub.add_parser("config", help="print the resolved config and its hash")
     sub.add_parser("report", help="stitch stage summaries into report/RESULTS.md")
-    r = sub.add_parser("nb", help="execute aucov_across_pops/<name>.ipynb for this run (papermill)")
+    r = sub.add_parser("nb", help="execute aucov_across_pops/<name>.ipynb for this run (nbclient)")
     r.add_argument("name")
     r.add_argument("--force", action="store_true")
     y = sub.add_parser("sync", help="copy a local root to params.mirror (gcloud storage rsync)")
@@ -117,16 +117,27 @@ def main(argv=None) -> int:
         return 0
 
     if a.cmd == "nb":
-        import papermill as pm
+        # nbclient ships with Jupyter; papermill drags in gcsfs and google-cloud upgrades
+        import os
+        import nbformat
+        from nbclient import NotebookClient
         from .config import _repo_root
 
         src = f"{_repo_root()}/aucov_across_pops/{a.name}.ipynb"
         out = cfg.path("notebooks", f"{a.name}.ipynb")
-        if not out.startswith("gs://"):
-            import os
-            os.makedirs(os.path.dirname(out), exist_ok=True)
-        pm.execute_notebook(src, out, parameters={"RUN_ID": cfg.run_id, "FORCE": a.force},
-                            cwd=f"{_repo_root()}/aucov_across_pops", progress_bar=False)
+        if out.startswith("gs://"):
+            print("nb needs a local root", file=sys.stderr)
+            return 1
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        nb = nbformat.read(src, as_version=4)
+        cell = next(c for c in nb.cells if "parameters" in c.metadata.get("tags", []))
+        cell.source = f"RUN_ID = {cfg.run_id!r}\nFORCE = {a.force}"
+        client = NotebookClient(nb, timeout=None, kernel_name="python3",
+                                resources={"metadata": {"path": f"{_repo_root()}/aucov_across_pops"}})
+        try:
+            client.execute()
+        finally:
+            nbformat.write(nb, out)   # failed runs keep their outputs up to the error
         print(f"executed -> {out}")
         return 0
 

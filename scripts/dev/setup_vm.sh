@@ -4,8 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-python3 -m pip install -q numpy pandas scipy scikit-learn matplotlib papermill ipykernel nbformat
-python3 -m pip install -q -e .
+# install only what's missing, never upgrade: the Workbench's Jupyter env pins its google-cloud stack
+need=$(python3 - <<'PY'
+import importlib.util
+mods = {"numpy": "numpy", "pandas": "pandas", "scipy": "scipy", "sklearn": "scikit-learn",
+        "matplotlib": "matplotlib", "nbclient": "nbclient", "nbformat": "nbformat", "ipykernel": "ipykernel"}
+print(" ".join(p for m, p in mods.items() if importlib.util.find_spec(m) is None))
+PY
+)
+[ -z "$need" ] || python3 -m pip install -q $need
 
 Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   .libPaths(c(lib, .libPaths()))

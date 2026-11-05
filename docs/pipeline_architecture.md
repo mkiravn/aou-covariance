@@ -38,7 +38,7 @@ notebooks/              the 1kg_eur record; not edited
 A stage notebook opens with:
 
 ```python
-RUN_ID = "yri"                       # papermill parameter cell
+RUN_ID = "yri"                       # parameter cell, set by `aoucov nb`
 cfg = load_run(RUN_ID)
 rep = Report(cfg, "ancestry_round2")
 ```
