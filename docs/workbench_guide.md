@@ -1,7 +1,7 @@
 # Running aucov_across_pops on the Workbench
 
 One run = one target population = one config, `runs/<target>.json`, named by its 1000G populations
-(`ceu_gbr`, `chb_chs`, `stu_itu_beb`). `superpop` sets round 1 and round 2's PCA; `target_pops` sets round 2's gate.
+(`chb_chs`, `stu_itu_beb`). `superpop` sets round 1 and round 2's PCA; `target_pops` sets round 2's gate.
 
 ## Once
 
@@ -22,25 +22,39 @@ One run = one target population = one config, `runs/<target>.json`, named by its
 
 | run | `superpop` | `target_pops` | 1000G people (2,504 set) |
 |---|---|---|---|
-| `ceu_gbr` | EUR | CEU+GBR | 99 + 91 |
 | `chb_chs` | EAS | CHB+CHS | 103 + 105 |
 | `yri` | AFR | YRI | 108 |
 | `lwk` | AFR | LWK | 99 |
 | `stu_itu_beb` | SAS | STU+ITU+BEB | 102 + 102 + 86 |
 
-`ceu_gbr` also holds `hm3_overlap`'s shared SNP list. `yri` and `lwk` share round 1 (same `superpop`), so
+`chb_chs` also holds `hm3_overlap`'s shared SNP list. `yri` and `lwk` share round 1 (same `superpop`), so
 their round-1 output is identical. `r2_k = 4`, `r2_q = 0.999` are provisional in all of them: set them from the
 round-2 diagnostics.
+
+## Uniform sample (`uniform_10k`)
+
+10,000 people drawn at random from everyone in `ancestry_preds` (`uniform_n`, `seed`), so the ancestry mix is
+the cohort's. `uniform_sample` replaces round 1, and round 2 only fits the PCA on all of 1000G
+(`superpop: "ALL"`) to show where the sample lands; there is no gate. Order:
+
+```bash
+nohup bash -c 'for nb in uniform_sample hm3_panel ancestry_round2 covariate_pcs grm; do
+  python -m aoucov --run uniform_10k nb $nb || break; done
+python -m aoucov --run uniform_10k sync' > ~/uniform_10k.log 2>&1 &
+```
+
+It needs `chb_chs`'s `hm3_overlap` first. A GRM in a mixed sample carries ancestry structure: on simulated data
+12% of pairs fell outside the bins (−0.05 to 1.5) and the h2 checks don't apply.
 
 ## A new target population
 
 On your laptop, not the VM (the VM never pushes):
 
 ```bash
-cp runs/ceu_gbr.json runs/pur.json
+cp runs/chb_chs.json runs/pur.json
 ```
 
-Edit `run_id`, `root`, `mirror`, `superpop` (`AMR`), `target_pops` (`["PUR"]`). `hm3_ids` can keep pointing at `ceu_gbr`'s file: it doesn't depend on the population. Then:
+Edit `run_id`, `root`, `mirror`, `superpop` (`AMR`), `target_pops` (`["PUR"]`). `hm3_ids` can keep pointing at `chb_chs`'s file: it doesn't depend on the population. Then:
 
 ```bash
 git add runs/pur.json && git commit -m "Run config: PUR" && git tag run-pur-v1 && git push --tags origin HEAD
@@ -89,8 +103,8 @@ The executed notebook, with outputs, is in
 The configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop after round 2. An `n1-standard-16` is enough for this part (`threads` is capped at the VM's cores).
 
 ```bash
-nohup bash -c 'python -m aoucov --run ceu_gbr nb hm3_overlap   # once, writes the shared hm3_ids
-for run in ceu_gbr chb_chs yri lwk stu_itu_beb; do
+nohup bash -c 'python -m aoucov --run chb_chs nb hm3_overlap   # once, writes the shared hm3_ids
+for run in chb_chs yri lwk stu_itu_beb; do
   for nb in ancestry_round1 hm3_panel ancestry_round2; do python -m aoucov --run $run nb $nb || break; done
   python -m aoucov --run $run sync
 done' > ~/ancestry.log 2>&1 &

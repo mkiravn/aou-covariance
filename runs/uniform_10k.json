@@ -1,9 +1,9 @@
 {
-  "run_id": "ceu_gbr",
-  "root": "~/aucov_runs/ceu_gbr",
+  "run_id": "uniform_10k",
+  "root": "~/aucov_runs/uniform_10k",
   "params": {
     "simulated": false,
-    "mirror": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/ceu_gbr",
+    "mirror": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/uniform_10k",
     "scratch": "~/aucov_scratch",
     "inputs": {
       "ancestry_preds": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv",
@@ -12,7 +12,7 @@
       "acaf_pfile": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
       "ref_bfile": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/1000g_reference/1kg_all_qc",
       "ref_labels": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/reference_labels/20130606_g1k_3202_samples_ped_population.txt",
-      "hm3_ids": "~/aucov_runs/ceu_gbr/diagnostics/hm3_ids_matched.txt",
+      "hm3_ids": "~/aucov_runs/chb_chs/diagnostics/hm3_ids_matched.txt",
       "phenotype_tables": "TODO: folder of {phenotype}.tsv (person_id, phenotype, age, sex_at_birth) pulled for the whole cohort",
       "phenotype_list": "docs/phenotype_list.tsv",
       "ld_regions": "resources/high_ld_regions_hg38.txt",
@@ -25,16 +25,9 @@
       "grm_class_tool": "src/grm_class_tool"
     },
     "threads": 62,
-    "superpop": "EUR",
-    "r1_n_pcs": 5,
-    "r1_width": 0.99,
     "qc_maf": 0.01,
     "qc_hwe": 1e-06,
     "qc_geno": 0.05,
-    "target_pops": ["CEU", "GBR"],
-    "r2_n_pcs_fit": 10,
-    "r2_k": 4,
-    "r2_q": 0.999,
     "cov_n_pcs": 10,
     "cov_r2": 0.1,
     "cov_kin_cut": 0.1,
@@ -45,9 +38,12 @@
     },
     "outlier_sd": 5,
     "seed": 1,
-    "n_shards": 60,
+    "n_shards": 4,
     "nblocks": 50,
-    "billing_project": "wb-swift-sprout-7231"
+    "billing_project": "wb-swift-sprout-7231",
+    "uniform_n": 10000,
+    "superpop": "ALL",
+    "r2_n_pcs_fit": 10
   },
   "lists": {
     "phenotypes": [
@@ -65,7 +61,7 @@
   },
   "stages": {
     "ancestry_round1": {
-      "description": "ellipsoid on AoU's premade PCs around a 1000G superpopulation",
+      "description": "uniform random sample of 10000 from everyone in ancestry_preds (uniform_sample notebook)",
       "dir": "ancestry/round1",
       "pattern": "keep.txt"
     },
@@ -78,7 +74,7 @@
       ]
     },
     "round2_pca": {
-      "description": "PCA on the 1000G superpopulation (bed_autoSVD), round-1 set projected by OADP; gate to target_pops",
+      "description": "PCA on all of 1000G (bed_autoSVD), uniform sample projected by OADP; no gate",
       "dir": "ancestry/round2",
       "pattern": "scores.tsv",
       "needs": [
@@ -86,11 +82,11 @@
       ]
     },
     "ancestry_round2": {
-      "description": "robust Mahalanobis gate around the anchor populations",
+      "description": "same list as ancestry_round1: no ancestry gate (written by uniform_sample)",
       "dir": "ancestry/round2",
       "pattern": "keep.txt",
       "needs": [
-        "round2_pca"
+        "ancestry_round1"
       ]
     },
     "covariate_pcs": {

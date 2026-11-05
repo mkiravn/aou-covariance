@@ -29,7 +29,7 @@ resources/              NEW  committed, public, non-participant files
   high_ld_regions_hg38.txt   was inlined in 02_round2_gate
 runs/
   1kg_eur.json          exists, describes the finished CEU/GBR run
-  ceu_gbr  chb_chs  yri  lwk  stu_itu_beb  …   NEW, one per target population, named by its 1000G pops
+  chb_chs  yri  lwk  stu_itu_beb  …   NEW, one per target population, named by its 1000G pops
 aucov_across_pops/      NEW  stage notebooks, named by stage id, parametrised by RUN_ID
 scripts/sim/, scripts/dev/   simulator, run-all, local setup
 notebooks/              the 1kg_eur record; not edited
@@ -144,7 +144,7 @@ The paper removes relatives only from the set used to **fit** PCs, so that proje
 
 ## Open decisions
 
-1. **Round-2 targets** (decided 2026-11-05): CEU+GBR, CHB+CHS, YRI, LWK, STU+ITU+BEB. Most AoU African-ancestry participants sit on an admixture cline, so the AFR round-1 gate may hold few people. The curve in stage 1 will show it.
+1. **Round-2 targets** (decided 2026-11-05): CHB+CHS, YRI, LWK, STU+ITU+BEB; not CEU+GBR (1kg_eur covers it). Most AoU African-ancestry participants sit on an admixture cline, so the AFR round-1 gate may hold few people. The curve in stage 1 will show it.
 2. **GRM variant set:** HM3-only (~1.0M) for the new runs, against `1kg_eur`'s ~1.69M. Keep the difference, or rebuild `1kg_eur`'s GRM on HM3 so all runs match?
 3. **Covariate PCA fit set:** (a) or (b) above.
 4. **IBD:** is there a phased callset, and is phasing in scope if not?
@@ -161,4 +161,4 @@ The round-2 radius comes from chi-square, which needs a calibrated scatter. `big
 
 ## Local runs on simulated data
 
-`docs/local_walkthrough.md`. `runs/sim.json` and `runs/ceu_gbr.json` share stages and parameters; only `inputs`, `tools`, `backend` and sizes differ.
+`docs/local_walkthrough.md`. `runs/sim.json` and `runs/chb_chs.json` share stages and parameters; only `inputs`, `tools`, `backend` and sizes differ.

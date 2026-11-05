@@ -12,7 +12,7 @@
       "acaf_pfile": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
       "ref_bfile": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/1000g_reference/1kg_all_qc",
       "ref_labels": "~/workspace/Data from All of Us Controlled Tier /shared-env-pilot/reference_labels/20130606_g1k_3202_samples_ped_population.txt",
-      "hm3_ids": "~/aucov_runs/ceu_gbr/diagnostics/hm3_ids_matched.txt",
+      "hm3_ids": "~/aucov_runs/chb_chs/diagnostics/hm3_ids_matched.txt",
       "phenotype_tables": "TODO: folder of {phenotype}.tsv (person_id, phenotype, age, sex_at_birth) pulled for the whole cohort",
       "phenotype_list": "docs/phenotype_list.tsv",
       "ld_regions": "resources/high_ld_regions_hg38.txt",
