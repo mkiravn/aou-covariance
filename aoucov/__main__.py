@@ -73,6 +73,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("nb", help="execute aucov_across_pops/<name>.ipynb for this run (papermill)")
     r.add_argument("name")
     r.add_argument("--force", action="store_true")
+    y = sub.add_parser("sync", help="copy a local root to params.mirror (gcloud storage rsync)")
+    y.add_argument("--dry-run", action="store_true")
 
     a = p.parse_args(argv)
     cfg = load_run(a.run)
@@ -127,6 +129,22 @@ def main(argv=None) -> int:
                             cwd=f"{_repo_root()}/aucov_across_pops", progress_bar=False)
         print(f"executed -> {out}")
         return 0
+
+    if a.cmd == "sync":
+        import subprocess
+        mirror = cfg.params.get("mirror")
+        if not mirror or cfg.root.startswith("gs://"):
+            print("needs a local root and params.mirror", file=sys.stderr)
+            return 1
+        import shutil
+        if not shutil.which("gcloud"):
+            print("gcloud not found", file=sys.stderr)
+            return 1
+        cmd = ["gcloud", "storage", "rsync", "--recursive", cfg.root, mirror.rstrip("/")]
+        if a.dry_run:
+            cmd.append("--dry-run")
+        print(" ".join(cmd), file=sys.stderr)
+        return subprocess.run(cmd).returncode
 
     if a.cmd == "report":
         print(write_results(cfg))

@@ -29,7 +29,7 @@ resources/              NEW  committed, public, non-participant files
   high_ld_regions_hg38.txt   was inlined in 02_round2_gate
 runs/
   1kg_eur.json          exists, describes the finished CEU/GBR run
-  eur.json  afr.json  eas.json  sas.json      NEW, one per target population
+  ceu_gbr.json  chb_jpt.json  yri.json …   NEW, one per target population, named by its 1000G pops
 aucov_across_pops/      NEW  stage notebooks, named by stage id, parametrised by RUN_ID
 scripts/sim/, scripts/dev/   simulator, run-all, local setup
 notebooks/              the 1kg_eur record; not edited
@@ -38,14 +38,14 @@ notebooks/              the 1kg_eur record; not edited
 A stage notebook opens with:
 
 ```python
-RUN_ID = "afr"                       # papermill parameter cell
+RUN_ID = "yri"                       # papermill parameter cell
 cfg = load_run(RUN_ID)
 rep = Report(cfg, "ancestry_round2")
 ```
 
 Run each notebook interactively the first time. Decisions you make by eye (K, radius,
 which PCs are LD artefacts) go into the run config, not into a cell. After that,
-`papermill aucov_across_pops/X.ipynb - -p RUN_ID eas` re-executes a stage for another
+`python -m aoucov --run chb_jpt nb X` re-executes a stage for another
 population, and the executed copy, with outputs, lands in the bucket next to the
 report. The repo copy stays output-free.
 
@@ -53,15 +53,14 @@ report. The repo copy stays output-free.
 
 ```json
 {
-  "run_id": "afr",
-  "root": "gs://…/phenotypic_covariance_v9/afr",
+  "run_id": "yri",
+  "root": "~/aucov_runs/yri",
   "params": {
     "cdr": "v9",
-    "r1_ref_pops": ["YRI", "LWK", "GWD", "MSL", "ESN"],
+    "superpop": "AFR",
+    "target_pops": ["YRI"],
     "r1_n_pcs": 5,
     "r1_width": 0.99,
-    "r2_train_pops": ["YRI", "LWK", "GWD", "MSL", "ESN"],
-    "r2_anchor_pops": ["YRI", "ESN"],
     "r2_k": null,
     "r2_width": null,
     "grm_maf": 0.01,
@@ -72,6 +71,9 @@ report. The repo copy stays output-free.
 }
 ```
 
+`superpop` sets round 1 (ellipsoid around all its 1000G populations) and round 2's PCA training set; `target_pops`
+sets round 2's gate. AFR includes ASW and ACB, which are admixed; AMR is admixed throughout.
+
 `null` means not decided yet. A stage that needs it refuses to run.
 
 ## Stages
@@ -80,7 +82,7 @@ Every stage reads only what `needs` names and writes only under its own `dir`.
 
 ### 1. `ancestry_round1`: premade PCs, ellipsoid around a 1000G superpopulation
 - **In:** `ancestry_preds.tsv` (16 PCs per participant), `training_pca.tsv` (reference panel in the same space), 1000G/HGDP labels.
-- **Method:** `01_round1_gate`'s code, copied into the notebook. MVN fit to the founders of `r1_ref_pops` on the first `r1_n_pcs` PCs; radius = the `r1_width` quantile of the founders' own distances.
+- **Method:** `01_round1_gate`'s code, copied into the notebook. MVN fit to the founders of every 1000G population in `superpop` on the first `r1_n_pcs` PCs; radius = the `r1_width` quantile of the founders' own distances.
 - **Out:** keep list. **Report:** kept-N vs coverage curve (a plateau means a cluster, steady growth means an admixture continuum), gate in PC space, kinship-class counts inside the gate.
 - Same code for every superpopulation, so `1kg_eur` round 1 and the new runs can't drift apart.
 
@@ -88,13 +90,13 @@ Every stage reads only what `needs` names and writes only under its own `dir`.
 This is where Privé et al. 2020 (doi:10.1093/bioinformatics/btaa520) applies most directly.
 
 - **Variants:** HM3 SNPs, QC'd in the round-1 set (MAF ≥ 1%, HWE, missingness), matched to 1000G on ID+REF+ALT, **A/T and C/G removed**, MAF ≥ 1% in the training subset too.
-- **Training set:** 1000G founders of `r2_train_pops`, KING-unrelated (< 0.0884), with LOF outliers removed (`bigutilsr::prob_dist`). That's about 500 people for a superpopulation.
+- **Training set:** 1000G founders of `superpop`, KING-unrelated (< 0.0884), with LOF outliers removed (`bigutilsr::prob_dist`). That's about 500 people for a superpopulation.
 - **PCA:** `bigsnpr::bed_autoSVD`: clumping at r² = 0.2, then iterative removal of long-range-LD outlier variants. Our hardcoded hg38 LD list is excluded as well.
 - **Projection:** `bigsnpr::bed_projectPCA` with **OADP**, not `plink2 --score`. With ~500 training samples, simple projection shrinks AoU scores substantially from about PC4 onward. The paper reports shrinkage factors of 1.36 at PC5 and 2.84 at PC10 even with all 2,500 1000G samples. Because the gate compares in-sample 1000G scores against projected AoU scores, shrinkage would put the gate in the wrong place.
 - **K:** pick PCs that show population structure in the scores and have no single-region peak in the loadings. Probably 3–5 within a superpopulation. Set `r2_k` in the config.
-- **Gate:** robust Mahalanobis distance (OGK in bigutilsr, or MCD in Python) around `r2_anchor_pops` in the first K PCs.
+- **Gate:** robust Mahalanobis distance (OGK in bigutilsr, or MCD in Python) around `target_pops` in the first K PCs.
 - **Runs on:** one Batch job (R + bigsnpr), about 300K people × ~100–200K variants. The paper projected 488K UKBB in 12 minutes on 20 cores. The gate itself runs in the notebook.
-- **Report:** simple vs OADP scores (shows the shrinkage), loadings by position, scores coloured by 1000G population, kept-N vs radius, overlap with `1kg_eur`'s keep list (EUR run only).
+- **Report:** simple vs OADP scores (shows the shrinkage), loadings by position, scores coloured by 1000G population, kept-N vs radius, overlap with `1kg_eur`'s keep list (CEU+GBR run only).
 
 ### 3. `covariate_pcs`
 HM3 common SNPs, r² = 0.1, 20 PCs, fit within the final sample. This is the 02a decision, kept for consistency. See "Relatives" below for which people are used to fit them.
@@ -159,4 +161,4 @@ The round-2 radius comes from chi-square, which needs a calibrated scatter. `big
 
 ## Local runs on simulated data
 
-`docs/local_walkthrough.md`. `runs/sim.json` and `runs/eur.json` share stages and parameters; only `inputs`, `tools`, `backend` and sizes differ.
+`docs/local_walkthrough.md`. `runs/sim.json` and `runs/ceu_gbr.json` share stages and parameters; only `inputs`, `tools`, `backend` and sizes differ.

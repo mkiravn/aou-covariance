@@ -42,6 +42,4 @@ set `r2_k` and `r2_q` in `runs/sim.json`, rerun. A finished output is kept on re
 
 ## On the Workbench
 
-Same notebooks with `RUN_ID = "eur"`. Fill the `TODO` inputs in `runs/eur.json`; run `hm3_overlap` first, its
-`hm3_ids_matched.txt` is the `hm3_ids` input. Variant IDs are `chr:pos:ref:alt` without "chr" (plink2 `@:#:$r:$a`). The `%%bash` and R cells
-run on the VM; at full scale the panel and GRM-shard cells need Batch (dsub), which isn't wired yet.
+See `docs/workbench_guide.md`.

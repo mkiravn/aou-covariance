@@ -24,29 +24,13 @@
       "grm_class_tool": "src/grm_class_tool"
     },
     "threads": 4,
-    "r1_ref_pops": [
-      "CEU",
-      "GBR",
-      "FIN",
-      "TSI",
-      "IBS"
-    ],
+    "superpop": "EUR",
     "r1_n_pcs": 5,
     "r1_width": 0.99,
     "qc_maf": 0.01,
     "qc_hwe": 1e-06,
     "qc_geno": 0.05,
-    "r2_train_pops": [
-      "CEU",
-      "GBR",
-      "FIN",
-      "TSI",
-      "IBS"
-    ],
-    "r2_anchor_pops": [
-      "CEU",
-      "GBR"
-    ],
+    "target_pops": ["CEU", "GBR"],
     "r2_n_pcs_fit": 10,
     "r2_k": 3,
     "r2_q": 0.999,
@@ -92,7 +76,7 @@
       ]
     },
     "round2_pca": {
-      "description": "PCA on the 1000G superpopulation (bed_autoSVD), round-1 set projected by OADP",
+      "description": "PCA on the 1000G superpopulation (bed_autoSVD), round-1 set projected by OADP; gate to target_pops",
       "dir": "ancestry/round2",
       "pattern": "scores.tsv",
       "needs": [
