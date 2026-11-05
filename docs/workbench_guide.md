@@ -18,6 +18,17 @@ One run = one target population = one config, `runs/<target>.json`, named by its
    df -h ~
    ```
 
+## Everything in one go
+
+Setup, the shared HM3 list, then rounds 1–2 for every run (and the two 10K samples), syncing each:
+
+```bash
+cd ~/aou-covariance && git pull && nohup bash scripts/dev/run_ancestry.sh > ~/ancestry.log 2>&1 &
+```
+
+Follow it with `tail -f ~/ancestry.log` (`Ctrl-c` stops following, not the run). A failed stage stops only that
+run; rerunning skips what's finished.
+
 ## Runs that exist
 
 | run | `superpop` | `target_pops` | 1000G people (2,504 set) |
