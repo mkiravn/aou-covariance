@@ -20,8 +20,18 @@ One run = one target population = one config, `runs/<target>.json`, named by its
 
 ## Runs that exist
 
-`ceu_gbr` (EUR → CEU+GBR), `chb_jpt` (EAS → CHB+JPT), `yri` (AFR → YRI). `r2_k = 4`, `r2_q = 0.999` in all three
-are provisional: set them from the round-2 diagnostics.
+One per superpopulation:
+
+| run | `superpop` | `target_pops` | 1000G people (2,504 set) |
+|---|---|---|---|
+| `ceu_gbr` | EUR | CEU+GBR | 99 + 91 |
+| `chb_jpt` | EAS | CHB+JPT | 103 + 104 |
+| `yri` | AFR | YRI | 108 |
+| `gih` | SAS | GIH | 103 |
+| `mxl` | AMR | MXL | 64 |
+
+`r2_k = 4`, `r2_q = 0.999` are provisional in all of them: set them from the round-2 diagnostics. AMR is admixed
+throughout, so `mxl`'s round 1 is wide. Alternatives: ASW (AFR, African American), PUR (AMR), PJL or ITU (SAS).
 
 ## A new target population
 
@@ -77,11 +87,11 @@ The executed notebook, with outputs, is in
 
 ## Ancestry filtering only, several populations
 
-The three configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop after round 2. An `n1-standard-16` is enough for this part (`threads` is capped at the VM's cores).
+The configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop after round 2. An `n1-standard-16` is enough for this part (`threads` is capped at the VM's cores).
 
 ```bash
 nohup bash -c 'python -m aoucov --run ceu_gbr nb hm3_overlap   # once, writes the shared hm3_ids
-for run in ceu_gbr chb_jpt yri; do
+for run in ceu_gbr chb_jpt yri gih mxl; do
   for nb in ancestry_round1 hm3_panel ancestry_round2; do python -m aoucov --run $run nb $nb || break; done
   python -m aoucov --run $run sync
 done' > ~/ancestry.log 2>&1 &
