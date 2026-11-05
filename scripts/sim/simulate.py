@@ -2,7 +2,8 @@
 """Simulated AoU-shaped inputs for running the pipeline locally. Not participant data.
 
 Writes, under --out (default .sim/inputs), the files a real run reads from the CDR:
-  acaf/acaf_threshold.chr{c}.{bed,bim,fam}, aux/ancestry/{ancestry_preds,training_pca}.tsv,
+  acaf/acaf_threshold.chr{c}.{pgen,pvar,psam} (IDs chr:pos:REF, multi-allelic sites on one row, as AoU ships them),
+  aux/ancestry/{ancestry_preds,training_pca}.tsv,
   aux/relatedness/samples_relatedness.tsv, reference/1kg_sim.* (+ labels, hm3_snps.txt, w_hm3_sim.snplist, 1kg_sim_rs.pvar),
   phenotypes/{height,bmi}.tsv, truth.json
 
@@ -15,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -75,11 +78,30 @@ def write_bed(prefix, G, fam, bim):
     bim.to_csv(prefix + ".bim", sep="\t", header=False, index=False)
 
 
+def write_acaf_pgen(prefix, G, iids, chrom, pos, ref, alt, alt2, carriers, plink2):
+    """ACAF as AoU ships it: pgen, IDs chr:pos:REF, and a second ALT joined onto the row (REF -> ALT,ALT2)."""
+    gt = np.array(["0/0", "0/1", "1/1"])
+    S = np.where((G >= 0) & (G <= 2), gt[np.clip(G, 0, 2)], "./.").astype("<U3")
+    S[carriers] = "0/2"
+    alts = np.where(alt2 != "", alt + "," + alt2, alt)
+    with open(prefix + ".vcf", "w") as fh:
+        fh.write('##fileformat=VCFv4.2\n##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
+        fh.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(iids) + "\n")
+        for j in range(len(pos)):
+            fh.write(f"chr{chrom}\t{pos[j]}\tchr{chrom}:{pos[j]}:{ref[j]}\t{ref[j]}\t{alts[j]}\t.\tPASS\t.\tGT\t"
+                     + "\t".join(S[:, j]) + "\n")
+    subprocess.run([plink2, "--vcf", prefix + ".vcf", "--output-chr", "chrM", "--make-pgen",
+                    "--out", prefix, "--silent"], check=True)
+    os.remove(prefix + ".vcf")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=".sim/inputs")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--plink2", default=os.environ.get("PLINK2") or (".tools/bin/plink2" if os.path.exists(".tools/bin/plink2")
+                                                                      else shutil.which("plink2")))
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     out = a.out
@@ -275,9 +297,16 @@ def main():
 
     sex = rng.integers(1, 3, n)
     fam = pd.DataFrame({"fid": 0, "iid": pid, "pat": 0, "mat": 0, "sex": sex, "phe": -9})
+    # a rare second ALT at 30% of HM3 sites, on the same row: only splitting recovers those SNPs
+    r3 = np.random.default_rng(a.seed + 2000)
+    joined = hm3 & (r3.random(m) < 0.30)
+    other = {b: [x for x in "ACGT" if x != b] for b in "ACGT"}
+    alt2 = np.array([next(x for x in other[r] if x != t) if j else "" for r, t, j in zip(var["ref"], var["alt"], joined)])
+    carriers = (G == 0) & joined[None, :] & (r3.random(G.shape) < 0.005)
     for c in range(1, 23):
         k = (var["chr"] == c).to_numpy()
-        write_bed(f"{out}/acaf/acaf_threshold.chr{c}", G[:, k], fam, bim[k])
+        write_acaf_pgen(f"{out}/acaf/acaf_threshold.chr{c}", G[:, k], pid, c, var["pos"].to_numpy()[k],
+                        var["ref"].to_numpy()[k], var["alt"].to_numpy()[k], alt2[k], carriers[:, k], a.plink2)
 
     # ---- premade ancestry PCs: fit on the reference, project the cohort ---------------------------------
     founders = (ref["FatherID"] == "0").to_numpy()

@@ -7,7 +7,7 @@
       "ancestry_preds": ".sim/inputs/aux/ancestry/ancestry_preds.tsv",
       "training_pca": ".sim/inputs/aux/ancestry/training_pca.tsv",
       "relatedness": ".sim/inputs/aux/relatedness/samples_relatedness.tsv",
-      "acaf_bfile": ".sim/inputs/acaf/acaf_threshold.chr{chr}",
+      "acaf_pfile": ".sim/inputs/acaf/acaf_threshold.chr{chr}",
       "ref_bfile": ".sim/inputs/reference/1kg_sim",
       "ref_labels": ".sim/inputs/reference/1kg_sim_ped_population.txt",
       "hm3_ids": ".sim/inputs/reference/hm3_snps.txt",

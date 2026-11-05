@@ -151,7 +151,7 @@ def main(argv=None) -> int:
         if not shutil.which("gcloud"):
             print("gcloud not found", file=sys.stderr)
             return 1
-        cmd = ["gcloud", "storage", "rsync", "--recursive", cfg.root, mirror.rstrip("/")]
+        cmd = ["gcloud", "storage", "rsync", "--recursive", "--exclude", r".*\.ipynb_checkpoints.*", cfg.root, mirror.rstrip("/")]
         if a.dry_run:
             cmd.append("--dry-run")
         print(" ".join(cmd), file=sys.stderr)
