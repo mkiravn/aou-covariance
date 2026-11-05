@@ -132,8 +132,14 @@ def main(argv=None) -> int:
         nb = nbformat.read(src, as_version=4)
         cell = next(c for c in nb.cells if "parameters" in c.metadata.get("tags", []))
         cell.source = f"RUN_ID = {cfg.run_id!r}\nFORCE = {a.force}"
-        client = NotebookClient(nb, timeout=None, kernel_name="python3",
-                                resources={"metadata": {"path": f"{_repo_root()}/aucov_across_pops"}})
+        class Live(NotebookClient):   # cell output to the terminal/log as it happens, not only at the end
+            def output(self, outs, msg, display_id, cell_index):
+                if msg["msg_type"] == "stream":
+                    sys.stdout.write(msg["content"]["text"]); sys.stdout.flush()
+                return super().output(outs, msg, display_id, cell_index)
+
+        client = Live(nb, timeout=None, kernel_name="python3",
+                      resources={"metadata": {"path": f"{_repo_root()}/aucov_across_pops"}})
         try:
             client.execute()
         finally:

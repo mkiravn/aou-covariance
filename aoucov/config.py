@@ -99,7 +99,11 @@ class RunConfig:
         tools = self.params.get("tools") or {}
         if name not in tools:
             raise KeyError(f"run '{self.run_id}' has no tool '{name}'")
-        return _resolve_local(str(tools[name]))
+        path = _resolve_local(str(tools[name]))
+        if not os.path.exists(path):   # configured path missing: whatever is on PATH under that name
+            import shutil
+            path = shutil.which(os.path.basename(path)) or path
+        return path
 
     # ---- identity ----------------------------------------------------------
 
