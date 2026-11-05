@@ -7,13 +7,15 @@
       "ancestry_preds": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv",
       "training_pca": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/ancestry/training_pca.tsv",
       "relatedness": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/relatedness/samples_relatedness.tsv",
-      "acaf_pfile": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
+      "acaf_pfile": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
       "ref_bfile": "TODO: 1000G high-coverage GRCh38 bfile (1kg_all_qc under 1000g_reference)",
       "ref_labels": "TODO: 20130606_g1k_3202_samples_ped_population.txt under reference_labels",
-      "hm3_ids": "TODO: HapMap3 IDs in chr:pos:ref:alt form",
+      "hm3_ids": "TODO: diagnostics/hm3_ids_matched.txt written by hm3_overlap",
       "phenotype_tables": "TODO: output of the BigQuery pull (one TSV per phenotype)",
       "phenotype_list": "docs/phenotype_list.tsv",
-      "ld_regions": "resources/high_ld_regions_hg38.txt"
+      "ld_regions": "resources/high_ld_regions_hg38.txt",
+      "hm3_rsids": "TODO: w_hm3.noMHC.snplist (explore_1kg_reference copied it to the bucket as hm3.snplist)",
+      "ref_pvar_rsid": "TODO: all_hg38_rs_noannot.pvar.zst (plink2 resources, 1000G GRCh38 with rsIDs)"
     },
     "tools": {
       "plink2": "~/bin/plink2",
@@ -58,7 +60,8 @@
     "outlier_sd": 5,
     "seed": 1,
     "n_shards": 20,
-    "nblocks": 50
+    "nblocks": 50,
+    "billing_project": "wb-swift-sprout-7231"
   },
   "lists": {
     "phenotypes": [
@@ -178,6 +181,11 @@
       "needs": [
         "merged"
       ]
+    },
+    "hm3_overlap": {
+      "description": "diagnostic: HapMap3 from the rsID list to the QC'd panel, step by step",
+      "dir": "diagnostics",
+      "pattern": "hm3_overlap.tsv"
     }
   }
 }

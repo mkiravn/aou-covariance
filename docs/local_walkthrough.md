@@ -27,7 +27,7 @@ Run the next unblocked stage either way:
 - open `aucov_across_pops/<stage>.ipynb`, keep `RUN_ID = "sim"`, Run All, or
 - `.venv/bin/python -m aoucov --run sim nb <stage>` (executed copy goes to `.sim/runs/sim/notebooks/`).
 
-Order: `ancestry_round1` → `hm3_panel` → `ancestry_round2` → `covariate_pcs` → `grm` → `phenotypes` → `crossproducts` → `curves`.
+Order: `ancestry_round1` → `hm3_panel` → (`hm3_overlap`, optional diagnostic) → `ancestry_round2` → `covariate_pcs` → `grm` → `phenotypes` → `crossproducts` → `curves`.
 
 ## Decisions go in the config
 
@@ -42,5 +42,6 @@ set `r2_k` and `r2_q` in `runs/sim.json`, rerun. A finished output is kept on re
 
 ## On the Workbench
 
-Same notebooks with `RUN_ID = "eur"`. Fill the `TODO` inputs in `runs/eur.json`. The `%%bash` and R cells
+Same notebooks with `RUN_ID = "eur"`. Fill the `TODO` inputs in `runs/eur.json`; run `hm3_overlap` first, its
+`hm3_ids_matched.txt` is the `hm3_ids` input. Variant IDs are `chr:pos:ref:alt` without "chr" (plink2 `@:#:$r:$a`). The `%%bash` and R cells
 run on the VM; at full scale the panel and GRM-shard cells need Batch (dsub), which isn't wired yet.

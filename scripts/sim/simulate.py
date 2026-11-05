@@ -3,7 +3,7 @@
 
 Writes, under --out (default .sim/inputs), the files a real run reads from the CDR:
   acaf/acaf_threshold.chr{c}.{bed,bim,fam}, aux/ancestry/{ancestry_preds,training_pca}.tsv,
-  aux/relatedness/samples_relatedness.tsv, reference/1kg_sim.* (+ labels, hm3_snps.txt),
+  aux/relatedness/samples_relatedness.tsv, reference/1kg_sim.* (+ labels, hm3_snps.txt, w_hm3_sim.snplist, 1kg_sim_rs.pvar),
   phenotypes/{height,bmi}.tsv, truth.json
 
 Planted for the checks to catch: an unsampled European-like population, an
@@ -111,7 +111,7 @@ def main():
              ("G", "A"), ("G", "C"), ("G", "T"), ("T", "A"), ("T", "C"), ("T", "G")]
     al = np.array(pairs)[rng.integers(0, 12, m)]
     var["ref"], var["alt"] = al[:, 0], al[:, 1]
-    var["id"] = ("chr" + var["chr"].astype(str) + ":" + var["pos"].astype(str)
+    var["id"] = (var["chr"].astype(str) + ":" + var["pos"].astype(str)
                  + ":" + var["ref"] + ":" + var["alt"])
     bim = pd.DataFrame({"chr": var["chr"], "id": var["id"], "cm": 0, "pos": var["pos"],
                         "a1": var["alt"], "a2": var["ref"]})
@@ -260,6 +260,18 @@ def main():
     hm3 = rng.random(m) < FRAC_HM3
     hm3 |= is_inv                                  # the inversion SNPs are "HM3" too
     var.loc[hm3, "id"].to_csv(f"{out}/reference/hm3_snps.txt", index=False, header=False)
+    # rsID versions for the hm3_overlap diagnostic; separate RNG so nothing else changes
+    r2 = np.random.default_rng(a.seed + 1000)
+    rs = "rs" + (1_000_000 + np.arange(m)).astype(str)
+    pv = pd.DataFrame({"#CHROM": var["chr"], "POS": var["pos"], "ID": rs, "REF": var["ref"], "ALT": var["alt"]})
+    swap = hm3 & (r2.random(m) < 0.005)             # allele order disagrees with ACAF
+    pv.loc[swap, ["REF", "ALT"]] = pv.loc[swap, ["ALT", "REF"]].to_numpy()
+    multi = hm3 & ~swap & (r2.random(m) < 0.003)     # multi-allelic in the reference
+    pv.loc[multi, "ALT"] = pv.loc[multi, "ALT"] + ",N"
+    pv.to_csv(f"{out}/reference/1kg_sim_rs.pvar", sep="\t", index=False)
+    unmapped = "rs" + (90_000_000 + np.arange(int(0.02 * hm3.sum()))).astype(str)
+    pd.DataFrame({"SNP": np.r_[rs[hm3], unmapped]}).to_csv(
+        f"{out}/reference/w_hm3_sim.snplist", sep="\t", index=False)
 
     sex = rng.integers(1, 3, n)
     fam = pd.DataFrame({"fid": 0, "iid": pid, "pat": 0, "mat": 0, "sex": sex, "phe": -9})

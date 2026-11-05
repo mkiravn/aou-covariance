@@ -14,7 +14,9 @@
       "phenotype_tables": ".sim/inputs/phenotypes",
       "phenotype_list": "docs/phenotype_list.tsv",
       "ld_regions": "resources/high_ld_regions_hg38.txt",
-      "truth": ".sim/inputs/truth.json"
+      "truth": ".sim/inputs/truth.json",
+      "hm3_rsids": ".sim/inputs/reference/w_hm3_sim.snplist",
+      "ref_pvar_rsid": ".sim/inputs/reference/1kg_sim_rs.pvar"
     },
     "tools": {
       "plink2": ".tools/bin/plink2",
@@ -179,6 +181,11 @@
       "needs": [
         "merged"
       ]
+    },
+    "hm3_overlap": {
+      "description": "diagnostic: HapMap3 from the rsID list to the QC'd panel, step by step",
+      "dir": "diagnostics",
+      "pattern": "hm3_overlap.tsv"
     }
   }
 }
