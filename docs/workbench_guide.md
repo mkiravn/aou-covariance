@@ -18,6 +18,11 @@ One run = one target population = one config, `runs/<target>.json`, named by its
    df -h ~
    ```
 
+## Runs that exist
+
+`ceu_gbr` (EUR → CEU+GBR), `chb_jpt` (EAS → CHB+JPT), `yri` (AFR → YRI). `r2_k = 4`, `r2_q = 0.999` in all three
+are provisional: set them from the round-2 diagnostics.
+
 ## A new target population
 
 On your laptop, not the VM (the VM never pushes):
@@ -26,8 +31,7 @@ On your laptop, not the VM (the VM never pushes):
 cp runs/ceu_gbr.json runs/chb_jpt.json
 ```
 
-Edit `run_id`, `root`, `mirror`, `superpop` (`EAS`), `target_pops` (`["CHB", "JPT"]`), and set `r2_k`, `r2_q` to
-`null`. `hm3_ids` can keep pointing at `ceu_gbr`'s file: it doesn't depend on the population. Then:
+Edit `run_id`, `root`, `mirror`, `superpop` (`EAS`), `target_pops` (`["CHB", "JPT"]`). `hm3_ids` can keep pointing at `ceu_gbr`'s file: it doesn't depend on the population. Then:
 
 ```bash
 git add runs/chb_jpt.json && git commit -m "Run config: CHB+JPT" && git tag run-chb_jpt-v1 && git push --tags origin HEAD
@@ -37,15 +41,22 @@ On the VM: `cd ~/aou-covariance && git pull`.
 
 ## Running a stage
 
-Run stages inside `tmux` so they survive a closed browser tab:
+Short stages can run straight in the terminal:
 
 ```bash
-tmux new -s aucov
 python -m aoucov --run chb_jpt nb ancestry_round1
 python -m aoucov --run chb_jpt sync
 ```
 
-Detach with `Ctrl-b d`, reattach with `tmux attach -t aucov`. Without tmux: `nohup python -m aoucov --run chb_jpt nb grm > grm.log 2>&1 &`. The executed notebook, with outputs, is in
+Long ones (`hm3_overlap`, `hm3_panel`, `covariate_pcs`, `grm`) should survive a closed browser tab. The VM has no
+`tmux`, so use `nohup` and follow the log:
+
+```bash
+nohup python -m aoucov --run chb_jpt nb hm3_panel > ~/hm3_panel.chb_jpt.log 2>&1 &
+tail -f ~/hm3_panel.chb_jpt.log
+```
+
+The executed notebook, with outputs, is in
 `~/aucov_runs/chb_jpt/notebooks/`; open it in JupyterLab to look at the figures and checks.
 `python -m aoucov --run chb_jpt status` shows what's done (`ok`), partial (`**`), missing (`--`) or stale (`~~`).
 
@@ -66,15 +77,14 @@ Detach with `Ctrl-b d`, reattach with `tmux attach -t aucov`. Without tmux: `noh
 
 ## Ancestry filtering only, several populations
 
-Make the configs (above), with a provisional `r2_k` (e.g. 4) and `r2_q` (0.999) so the gate runs, then stop
-after round 2. An `n1-standard-16` is enough for this part.
+The three configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop after round 2. An `n1-standard-16` is enough for this part (`threads` is capped at the VM's cores).
 
 ```bash
-python -m aoucov --run ceu_gbr nb hm3_overlap   # once
+nohup bash -c 'python -m aoucov --run ceu_gbr nb hm3_overlap   # once, writes the shared hm3_ids
 for run in ceu_gbr chb_jpt yri; do
   for nb in ancestry_round1 hm3_panel ancestry_round2; do python -m aoucov --run $run nb $nb || break; done
   python -m aoucov --run $run sync
-done
+done' > ~/ancestry.log 2>&1 &
 ```
 
 `ancestry_round1` alone takes minutes (premade PCs only), and its result depends only on `superpop`. The cost
