@@ -200,8 +200,8 @@ def _repo_root() -> str:
 
 
 def _resolve_local(path: str) -> str:
-    """gs:// and absolute paths pass through; relative paths are repo-relative."""
-    if path.startswith("gs://"):
+    """gs://, https:// and absolute paths pass through; relative paths are repo-relative."""
+    if path.startswith(("gs://", "http://", "https://")):
         return path
     path = os.path.expanduser(path)
     if os.path.isabs(path):

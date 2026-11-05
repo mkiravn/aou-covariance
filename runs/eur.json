@@ -14,8 +14,8 @@
       "phenotype_tables": "TODO: output of the BigQuery pull (one TSV per phenotype)",
       "phenotype_list": "docs/phenotype_list.tsv",
       "ld_regions": "resources/high_ld_regions_hg38.txt",
-      "hm3_rsids": "TODO: w_hm3.noMHC.snplist (explore_1kg_reference copied it to the bucket as hm3.snplist)",
-      "ref_pvar_rsid": "TODO: all_hg38_rs_noannot.pvar.zst (plink2 resources, 1000G GRCh38 with rsIDs)"
+      "hm3_rsids": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/1000g_reference/hm3.snplist",
+      "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1"
     },
     "tools": {
       "plink2": "~/bin/plink2",
