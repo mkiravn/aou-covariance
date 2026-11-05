@@ -17,7 +17,8 @@
       "phenotype_list": "docs/phenotype_list.tsv",
       "ld_regions": "resources/high_ld_regions_hg38.txt",
       "hm3_rsids": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/1000g_reference/hm3.snplist",
-      "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1"
+      "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1",
+      "acaf_pfile_gs": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}"
     },
     "tools": {
       "plink2": "~/bin/plink2",
@@ -45,7 +46,18 @@
     "superpop": "ALL",
     "r2_n_pcs_fit": 10,
     "even_n_pcs": 4,
-    "even_k": 20
+    "even_k": 20,
+    "backend": "dsub",
+    "dsub": {
+      "project": "wb-swift-sprout-7231",
+      "region": "us-central1",
+      "service_account": "pet-27799165194323faf22e2@wb-swift-sprout-7231.iam.gserviceaccount.com",
+      "cloud_sdk_tag": "581.0.0-slim",
+      "machine_type": "n1-standard-8",
+      "threads": 8,
+      "logging": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/dsub_logs",
+      "plink2": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/bin/plink2"
+    }
   },
   "lists": {
     "phenotypes": [
@@ -67,12 +79,22 @@
       "dir": "ancestry/round1",
       "pattern": "keep.txt"
     },
+    "acaf_hm3": {
+      "description": "ACAF cut to HapMap3 for everyone, multi-allelic rows split, IDs chr:pos:ref:alt; once per CDR, shared by every run",
+      "dir": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/acaf_hm3",
+      "pattern": "hm3.chr{chr}.pgen",
+      "over": {
+        "chr": 22
+      },
+      "needs": []
+    },
     "hm3_panel": {
       "description": "HapMap3 SNPs, QC'd in the round-1 set, matched to the reference, no A/T or C/G",
       "dir": "panels",
       "pattern": "hm3_round1.bed",
       "needs": [
-        "ancestry_round1"
+        "ancestry_round1",
+        "acaf_hm3"
       ]
     },
     "round2_pca": {
@@ -105,7 +127,8 @@
       "dir": "grm/input",
       "pattern": "panel.bed",
       "needs": [
-        "ancestry_round2"
+        "ancestry_round2",
+        "acaf_hm3"
       ]
     },
     "grm_shards": {

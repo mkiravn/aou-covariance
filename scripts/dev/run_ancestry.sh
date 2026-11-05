@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Workbench, start to finish: setup, the shared HM3 list, ancestry filtering for every run, sync.
+# Workbench, start to finish: setup, the shared HM3 list and ACAF extract (dsub), ancestry filtering for every run, sync.
 #   cd ~/aou-covariance && git pull && nohup bash scripts/dev/run_ancestry.sh > ~/ancestry.log 2>&1 &
 # A failed stage stops that run only; the others carry on. Finished stages are skipped on a rerun.
 set -uo pipefail
@@ -20,6 +20,10 @@ f=$(python -m aoucov --run "$OVERLAP_RUN" targets hm3_overlap)
 grep -q "multi-allelic rows split" "$f" 2>/dev/null && force="" || force="--force"
 say "hm3_overlap $force"
 python -m aoucov --run "$OVERLAP_RUN" nb hm3_overlap $force || { say "hm3_overlap failed, stopping"; exit 1; }
+
+# ACAF cut to HM3 for everyone, one Batch task per chromosome; every run's panel reads it
+say "acaf_hm3 $force"
+python -m aoucov --run "$OVERLAP_RUN" nb acaf_hm3 $force || { say "acaf_hm3 failed, stopping"; exit 1; }
 
 stages() {   # run, stage notebooks...
   local run=$1; shift

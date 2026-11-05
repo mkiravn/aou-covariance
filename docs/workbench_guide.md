@@ -20,7 +20,7 @@ One run = one target population = one config, `runs/<target>.json`, named by its
 
 ## Everything in one go
 
-Setup, the shared HM3 list, then rounds 1–2 for every run (and the two 10K samples), syncing each:
+Setup, the shared HM3 list and its ACAF extract (dsub), then rounds 1–2 for every run (and the two 10K samples), syncing each:
 
 ```bash
 cd ~/aou-covariance && git pull && nohup bash scripts/dev/run_ancestry.sh > ~/ancestry.log 2>&1 &
@@ -114,7 +114,8 @@ The executed notebook, with outputs, is in
 |---|---|---|
 | `hm3_overlap` | SNPs lost at each step. Once per CDR, not per population | nothing |
 | `ancestry_round1` | coverage curve, gate on PCs 1–4 | `r1_width` if the gate cuts into the cloud |
-| `hm3_panel` | per-chromosome times (reads ACAF through the mount) | if chr1 takes hours, stop: this needs dsub |
+| `acaf_hm3` | once per CDR, on dsub: 22 Batch tasks cut ACAF to HM3 for everyone (multi-allelic rows split) into `aucov_across_pops/acaf_hm3/` | nothing; reruns skip finished chromosomes |
+| `hm3_panel` | per-chromosome times; reads `acaf_hm3`, not ACAF | nothing |
 | `ancestry_round2` | stops at the gate until `r2_k`, `r2_q` are set; scores by population, loadings by position | set `r2_k`, `r2_q` in the config, commit, pull, rerun |
 | `covariate_pcs` | scores, LD regions found | nothing |
 | `grm` | diagonal mean ≈ 1, N matches round 2 | nothing; the longest stage |

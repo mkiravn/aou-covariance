@@ -30,7 +30,10 @@
     "qc_maf": 0.01,
     "qc_hwe": 1e-06,
     "qc_geno": 0.05,
-    "target_pops": ["CEU", "GBR"],
+    "target_pops": [
+      "CEU",
+      "GBR"
+    ],
     "r2_n_pcs_fit": 10,
     "r2_k": 3,
     "r2_q": 0.999,
@@ -45,7 +48,8 @@
     "outlier_sd": 5,
     "seed": 1,
     "n_shards": 4,
-    "nblocks": 20
+    "nblocks": 20,
+    "backend": "local"
   },
   "lists": {
     "phenotypes": [
@@ -67,12 +71,22 @@
       "dir": "ancestry/round1",
       "pattern": "keep.txt"
     },
+    "acaf_hm3": {
+      "description": "ACAF cut to HapMap3 for everyone, multi-allelic rows split, IDs chr:pos:ref:alt; once per CDR, shared by every run",
+      "dir": "acaf_hm3",
+      "pattern": "hm3.chr{chr}.pgen",
+      "over": {
+        "chr": 22
+      },
+      "needs": []
+    },
     "hm3_panel": {
       "description": "HapMap3 SNPs, QC'd in the round-1 set, matched to the reference, no A/T or C/G",
       "dir": "panels",
       "pattern": "hm3_round1.bed",
       "needs": [
-        "ancestry_round1"
+        "ancestry_round1",
+        "acaf_hm3"
       ]
     },
     "round2_pca": {
@@ -105,7 +119,8 @@
       "dir": "grm/input",
       "pattern": "panel.bed",
       "needs": [
-        "ancestry_round2"
+        "ancestry_round2",
+        "acaf_hm3"
       ]
     },
     "grm_shards": {
