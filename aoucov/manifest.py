@@ -13,7 +13,7 @@ from itertools import product
 from typing import Any
 
 from .provenance import meta_uri, read_meta
-from .store import get_store, parent
+from .store import GcsStore, LocalStore, get_store, is_gs, parent
 
 
 def _fields(cfg, spec, combo: dict) -> dict:
@@ -84,6 +84,8 @@ class StageStatus:
 def stage_status(cfg, stage: str, store=None, check_shas: bool = False,
                  min_size: int = 1, _done_cache: dict | None = None) -> StageStatus:
     uris = targets(cfg, stage)
+    if uris and is_gs(uris[0]) and (store is None or isinstance(store, LocalStore)):
+        store = GcsStore()   # a stage with a gs:// dir under a local root (acaf_hm3)
     store = store or get_store(cfg.root)
     found = store.exists_many(uris, min_size=min_size)
     missing = [u for u in uris if not found[u]]
@@ -167,6 +169,8 @@ def pending_items(cfg, stage: str, store=None, force: bool = False
     items = target_items(cfg, stage)
     if force:
         return items
+    if items and is_gs(items[0][0]) and (store is None or isinstance(store, LocalStore)):
+        store = GcsStore()
     store = store or get_store(cfg.root)
     found = store.exists_many([u for u, _ in items])
     return [(u, it) for u, it in items if not found[u]]
