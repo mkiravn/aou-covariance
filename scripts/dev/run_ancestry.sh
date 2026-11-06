@@ -18,8 +18,12 @@ fi
 # the matched HM3 list every run reads; remade if it predates the multi-allelic split
 f=$(python -m aoucov --run "$OVERLAP_RUN" targets hm3_overlap)
 grep -q "multi-allelic rows split" "$f" 2>/dev/null && force="" || force="--force"
-say "hm3_overlap $force"
-python -m aoucov --run "$OVERLAP_RUN" nb hm3_overlap $force || { say "hm3_overlap failed, stopping"; exit 1; }
+if [ -s "$f" ] && [ -z "$force" ]; then
+  say "hm3_overlap already done"
+else
+  say "hm3_overlap $force"
+  python -m aoucov --run "$OVERLAP_RUN" nb hm3_overlap $force || { say "hm3_overlap failed, stopping"; exit 1; }
+fi
 
 # ACAF cut to HM3 for everyone, one Batch task per chromosome; every run's panel reads it
 say "acaf_hm3 $force"
