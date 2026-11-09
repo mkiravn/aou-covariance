@@ -37,11 +37,12 @@ run; rerunning skips what's finished.
 | `yri` | AFR | YRI | 108 |
 | `lwk` | AFR | LWK | 99 |
 | `stu_itu_beb` | SAS | STU+ITU+BEB | 102 + 102 + 86 |
+| `pjl` | SAS | PJL | 96 |
 | `asw` | AFR | ASW | 61 |
 | `mxl` | AMR | MXL | 64 |
 
 `chb_chs` also holds `hm3_overlap`'s shared SNP list. `yri` and `lwk` share round 1 (same `superpop`), so
-their round-1 output is identical (`asw` too). `asw` and `mxl` are admixed: an ellipsoid around a few dozen
+their round-1 output is identical (`asw` too; `pjl` matches `stu_itu_beb`). `asw` and `mxl` are admixed: an ellipsoid around a few dozen
 reference people keeps a narrow slice of the admixture cline, so check round 2's figures before trusting the gate. `r2_k = 4`, `r2_q = 0.999` are provisional in all of them: set them from the
 round-2 diagnostics.
 
@@ -133,7 +134,7 @@ The configs above already have provisional `r2_k`/`r2_q`, so the gate runs. Stop
 
 ```bash
 nohup bash -c 'python -m aoucov --run chb_chs nb hm3_overlap   # once, writes the shared hm3_ids
-for run in chb_chs yri lwk stu_itu_beb asw mxl; do
+for run in chb_chs yri lwk stu_itu_beb pjl asw mxl; do
   for nb in ancestry_round1 hm3_panel ancestry_round2; do python -m aoucov --run $run nb $nb || break; done
   python -m aoucov --run $run sync
 done' > ~/ancestry.log 2>&1 &

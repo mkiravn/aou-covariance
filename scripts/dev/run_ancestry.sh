@@ -4,7 +4,7 @@
 # A failed stage stops that run only; the others carry on. Finished stages are skipped on a rerun.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-RUNS=${RUNS-"chb_chs yri lwk stu_itu_beb asw mxl"}
+RUNS=${RUNS-"chb_chs yri lwk stu_itu_beb pjl asw mxl"}
 SAMPLES=${SAMPLES-"uniform_10k:uniform_sample even_10k:even_sample"}   # run:notebook that replaces round 1
 OVERLAP_RUN=${OVERLAP_RUN:-chb_chs}
 SETUP=${SETUP:-1}
