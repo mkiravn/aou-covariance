@@ -32,6 +32,7 @@
     "cov_n_pcs": 10,
     "cov_r2": 0.1,
     "cov_kin_cut": 0.1,
+    "pcr_n_pcs": 4,
     "bins": {
       "fine": 0.001,
       "mid": 0.005,
@@ -140,6 +141,15 @@
       },
       "needs": [
         "grm_panel"
+      ]
+    },
+    "pcrelate": {
+      "description": "PC-Relate kinship on the GRM panel, allele frequencies from the covariate PCs; lower triangle, GCTA order",
+      "dir": "pcrelate",
+      "pattern": "kinship.bin",
+      "needs": [
+        "grm_shards",
+        "covariate_pcs"
       ]
     },
     "phenotypes": {
