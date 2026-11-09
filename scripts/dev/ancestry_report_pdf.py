@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from aoucov import load_run
 
-STAGES = ["ancestry_round1", "round2_pca", "ancestry_round2", "covariate_pcs"]
+STAGES = ["pop_gates", "ancestry_round1", "round2_pca", "ancestry_round2", "covariate_pcs"]   # pop_gates: report_pop_gates.ipynb
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/ancestry_report.pdf")
-runs = sys.argv[2:] or ["chb_chs", "yri", "lwk", "stu_itu_beb", "asw", "mxl", "uniform_10k", "even_10k"]
+runs = sys.argv[2:] or ["chb_chs", "yri", "lwk", "stu_itu_beb", "pjl", "asw", "mxl", "uniform_10k", "even_10k"]
 
 def text_page(pdf, title, lines):
     fig = plt.figure(figsize=(11, 8.5))
