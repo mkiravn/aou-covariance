@@ -62,8 +62,8 @@ It needs `chb_chs`'s `hm3_overlap` first. A GRM in a mixed sample carries ancest
 
 ## Even sample (`even_10k`)
 
-Same as `uniform_10k`, but `even_sample` draws with probability ∝ 1/density, where density is the k-nearest-
-neighbour density (`even_k`, 20) in AoU's premade PCs 1–`even_n_pcs` (4). The sample is spread evenly over the
+Same as `uniform_10k`, but `even_sample` draws with probability ∝ 1/(people in the same grid cell), on a grid of
+`even_bins` (10) equal-width bins per PC over AoU's premade PCs 1–`even_n_pcs` (4). The sample is spread evenly over the
 occupied PC space instead of mirroring the cohort, so admixed and rare ancestries are up-weighted. It reports
 how much more even it is than a random sample of the same size, and the ancestry mix of both. Run it like
 `uniform_10k`, with `even_sample` first:

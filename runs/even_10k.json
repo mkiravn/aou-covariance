@@ -46,7 +46,7 @@
     "superpop": "ALL",
     "r2_n_pcs_fit": 10,
     "even_n_pcs": 4,
-    "even_k": 20,
+    "even_bins": 10,
     "backend": "dsub",
     "dsub": {
       "project": "wb-swift-sprout-7231",
