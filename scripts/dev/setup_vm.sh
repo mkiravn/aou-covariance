@@ -33,6 +33,12 @@ Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); dir.create(lib, recursive = TRUE, 
                                     paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])))
     message("installing ", paste(need, collapse = " "), " from ", repo, " on ", n, " cores")
     install.packages(need, lib = lib, repos = repo, Ncpus = n)
+  }
+  bioc <- c("GENESIS", "SNPRelate", "GWASTools")   # pcrelate
+  bioc <- bioc[!vapply(bioc, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(bioc)) {
+    if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager", lib = lib, repos = "https://cloud.r-project.org")
+    BiocManager::install(bioc, lib = lib, update = FALSE, ask = FALSE, Ncpus = parallel::detectCores())
   }'
 step "R packages"
 
