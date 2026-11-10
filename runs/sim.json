@@ -16,12 +16,15 @@
       "ld_regions": "resources/high_ld_regions_hg38.txt",
       "truth": ".sim/inputs/truth.json",
       "hm3_rsids": ".sim/inputs/reference/w_hm3_sim.snplist",
-      "ref_pvar_rsid": ".sim/inputs/reference/1kg_sim_rs.pvar"
+      "ref_pvar_rsid": ".sim/inputs/reference/1kg_sim_rs.pvar",
+      "phased_vcf": ".sim/inputs/phased/chr{chr}.phased.vcf.bgz",
+      "genetic_map": "https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip"
     },
     "tools": {
       "plink2": ".tools/bin/plink2",
       "plink": ".tools/bin/plink",
-      "grm_class_tool": "src/grm_class_tool"
+      "grm_class_tool": "src/grm_class_tool",
+      "ilash": "~/bin/ilash"
     },
     "threads": 4,
     "superpop": "EUR",
@@ -195,6 +198,14 @@
       "description": "diagnostic: HapMap3 from the rsID list to the QC'd panel, step by step",
       "dir": "diagnostics",
       "pattern": "hm3_overlap.tsv"
+    },
+    "ilash": {
+      "description": "iLASH IBD segments in the final set (phased callset x HapMap3); per pair: segments, total cM, IBD kinship",
+      "dir": "ilash",
+      "pattern": "pairs.tsv",
+      "needs": [
+        "ancestry_round2"
+      ]
     }
   }
 }

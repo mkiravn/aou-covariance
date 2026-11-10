@@ -18,12 +18,15 @@
       "ld_regions": "resources/high_ld_regions_hg38.txt",
       "hm3_rsids": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/1000g_reference/hm3.snplist",
       "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1",
-      "acaf_pfile_gs": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}"
+      "acaf_pfile_gs": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
+      "phased_vcf": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/phasing/chr{chr}.aou.v9.phased.filtered.vcf.bgz",
+      "genetic_map": "https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip"
     },
     "tools": {
       "plink2": "~/bin/plink2",
       "plink": "~/bin/plink",
-      "grm_class_tool": "src/grm_class_tool"
+      "grm_class_tool": "src/grm_class_tool",
+      "ilash": "~/bin/ilash"
     },
     "threads": 62,
     "superpop": "SAS",
@@ -209,6 +212,14 @@
       "description": "diagnostic: HapMap3 from the rsID list to the QC'd panel, step by step",
       "dir": "diagnostics",
       "pattern": "hm3_overlap.tsv"
+    },
+    "ilash": {
+      "description": "iLASH IBD segments in the final set (phased callset x HapMap3); per pair: segments, total cM, IBD kinship",
+      "dir": "ilash",
+      "pattern": "pairs.tsv",
+      "needs": [
+        "ancestry_round2"
+      ]
     }
   }
 }
