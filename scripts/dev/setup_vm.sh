@@ -16,6 +16,7 @@ PY
 )
 [ -z "$need" ] || python3 -m pip install -q $need
 
+command -v cmake >/dev/null || python3 -m pip install -q cmake   # nloptr (GENESIS dependency) builds with cmake
 step "python"
 # R packages go to R_LIBS_USER in ~ (persistent disk): slow once, seconds after. Binaries from Posit Package
 # Manager when R is the system R; conda's R has to compile, so every core is used.
