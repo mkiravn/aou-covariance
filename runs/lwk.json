@@ -49,7 +49,7 @@
     },
     "outlier_sd": 5,
     "seed": 1,
-    "n_shards": 60,
+    "n_shards": 4,
     "nblocks": 50,
     "billing_project": "wb-swift-sprout-7231",
     "backend": "dsub",
