@@ -199,12 +199,22 @@
       "dir": "diagnostics",
       "pattern": "hm3_overlap.tsv"
     },
+    "phased_hm3": {
+      "description": "AoU phased callset cut to HapMap3 for everyone (PASS, multi-allelic split, IDs chr:pos:ref:alt), phase kept; once per CDR, shared by every run",
+      "dir": "phased_hm3",
+      "pattern": "phased.chr{chr}.pgen",
+      "over": {
+        "chr": 22
+      },
+      "needs": []
+    },
     "ilash": {
       "description": "iLASH IBD segments in the final set (phased callset x HapMap3); per pair: segments, total cM, IBD kinship",
       "dir": "ilash",
       "pattern": "pairs.tsv",
       "needs": [
-        "ancestry_round2"
+        "ancestry_round2",
+        "phased_hm3"
       ]
     }
   }

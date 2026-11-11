@@ -20,7 +20,8 @@
       "ref_pvar_rsid": "https://www.dropbox.com/scl/fi/id642dpdd858uy41og8qi/all_hg38_rs_noannot.pvar.zst?rlkey=sskyiyam1bsqweujjmxqv1h55&dl=1",
       "acaf_pfile_gs": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr{chr}",
       "phased_vcf": "~/workspace/cdrv9/vwb-aou-datasets-controlled-v9/v9/wgs/short_read/snpindel/aux/phasing/chr{chr}.aou.v9.phased.filtered.vcf.bgz",
-      "genetic_map": "https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip"
+      "genetic_map": "https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip",
+      "phased_vcf_gs": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/phasing/chr{chr}.aou.v9.phased.filtered.vcf.bgz"
     },
     "tools": {
       "plink2": "~/bin/plink2",
@@ -67,6 +68,11 @@
       "threads": 8,
       "logging": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/dsub_logs",
       "plink2": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/bin/plink2"
+    },
+    "dsub_phased": {
+      "machine_type": "n1-standard-16",
+      "threads": 16,
+      "preemptible": true
     }
   },
   "lists": {
@@ -213,12 +219,22 @@
       "dir": "diagnostics",
       "pattern": "hm3_overlap.tsv"
     },
+    "phased_hm3": {
+      "description": "AoU phased callset cut to HapMap3 for everyone (PASS, multi-allelic split, IDs chr:pos:ref:alt), phase kept; once per CDR, shared by every run",
+      "dir": "gs://cloned-shared-env-pilot-wb-swift-sprout-7231/phenotypic_covariance_v9/aucov_across_pops/phased_hm3",
+      "pattern": "phased.chr{chr}.pgen",
+      "over": {
+        "chr": 22
+      },
+      "needs": []
+    },
     "ilash": {
       "description": "iLASH IBD segments in the final set (phased callset x HapMap3); per pair: segments, total cM, IBD kinship",
       "dir": "ilash",
       "pattern": "pairs.tsv",
       "needs": [
-        "ancestry_round2"
+        "ancestry_round2",
+        "phased_hm3"
       ]
     }
   }
