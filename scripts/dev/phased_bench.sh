@@ -23,7 +23,7 @@ res() { printf '%-28s %8.0f s  %6s variants  -> %6.1f core-h for 2900 Mb\n' "$1"
 
 if [[ ! -s slice.vcf.gz ]]; then
   echo "fetching $REG $(date +%T)"
-  s=$(t bash -c "tabix -h '$VCF' '$REG' | bgzip -@ 8 > slice.vcf.gz && tabix -p vcf slice.vcf.gz")
+  s=$(t bash -c "tabix -h '$VCF' '$REG' | bgzip -l 1 -@ 16 > slice.vcf.gz && tabix -p vcf slice.vcf.gz")
   echo "fetch: ${s%.*} s, $(du -h slice.vcf.gz | cut -f1), $(zcat slice.vcf.gz | grep -vc '^#') records"
 fi
 awk -F: -v OFS='\t' -v c="$CHR" -v k="$contig" '$1 == c {print k, $2}' "$HM3" | sort -k2,2n -u > targets.tsv
