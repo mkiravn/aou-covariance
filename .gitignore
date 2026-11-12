@@ -74,3 +74,6 @@ src/grm_class_tool
 
 # grm_class_tool test scratch (make clean removes it)
 src/test/tmp/
+
+# grm_class_tool test scratch (make clean removes it)
+src/test/tmp/
