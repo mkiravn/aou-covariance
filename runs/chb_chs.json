@@ -166,6 +166,14 @@
         "covariate_pcs"
       ]
     },
+    "weir_goudet": {
+      "description": "Weir & Goudet (2017) allele-sharing kinship on the GRM panel, relative to the mean pair in the set; lower triangle, GCTA order",
+      "dir": "weir_goudet",
+      "pattern": "kinship.bin",
+      "needs": [
+        "grm_panel"
+      ]
+    },
     "phenotypes": {
       "description": "plausible range, residualise, 5 SD trim, standardise within sex",
       "dir": "phenotypes",
