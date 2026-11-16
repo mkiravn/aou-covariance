@@ -173,6 +173,14 @@
         "grm_panel"
       ]
     },
+    "allele_variance": {
+      "description": "observed genotype variance vs 2p(1-p) per GRM panel SNP (plink2 --geno-counts)",
+      "dir": "allele_variance",
+      "pattern": "panel.gcount",
+      "needs": [
+        "grm_panel"
+      ]
+    },
     "phenotypes": {
       "description": "plausible range, residualise, 5 SD trim, standardise within sex",
       "dir": "phenotypes",

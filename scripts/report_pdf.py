@@ -13,7 +13,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from aoucov import load_run
 
-STAGES = [("weir_goudet", "Relatedness: GRM, PC-Relate, Weir-Goudet"), ("ibd_vs_kinship", "Relatedness vs iLASH IBD"),
+STAGES = [("weir_goudet", "Relatedness: GRM, PC-Relate, Weir-Goudet"), ("ibd_vs_kinship", "Relatedness vs iLASH IBD"), ("allele_variance", "Genotype variance vs 2p(1-p)"),
           ("kin_pheno_cov", "Phenotypic covariance vs relatedness")]
 
 
@@ -123,6 +123,22 @@ def meta_rank(pdf, a, col):
     save(pdf, fig, "All groups: rank agreement between estimators", "Spearman correlation of off-diagonal relatedness; right: pairs with relatedness < 0.1 by all three.")
 
 
+def meta_variance(pdf, v, col):
+    v = v.assign(snps=pd.to_numeric(v["snps"], errors="coerce")); v = v[v["snps"] >= 21]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 8.5), sharey=True)
+    fig.subplots_adjust(top=0.9, bottom=0.16, wspace=0.08)
+    for ax, (c, lab) in zip(axes, [("var_ratio", "genotype variance / 2p(1-p)"), ("het_ratio", "heterozygosity / 2p(1-p)")]):
+        for run, g in v.groupby("run", sort=False):
+            ax.errorbar(g["mean_maf"], g[c], yerr=1.96 * g[c + "_se"], fmt="o-", ms=4, lw=1.3, capsize=2, color=col[run], label=run)
+        ax.axhline(1, color="0.5", lw=0.8, ls=":")
+        ax.set(xscale="log", xlabel="MAF (bin mean)", title=lab)
+        ax.set_xticks([0.01, 0.02, 0.05, 0.1, 0.2, 0.5], ["0.01", "0.02", "0.05", "0.1", "0.2", "0.5"]); ax.minorticks_off()
+    axes[0].set_ylabel("observed / expected")
+    hd, lb = axes[0].get_legend_handles_labels()
+    fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 8), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.04))
+    save(pdf, fig, "All groups: observed genotype variance vs 2p(1-p)", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. Ratio = 1 + F; panels of single-ancestry groups are HWE-filtered.")
+
+
 def pooled(g, v):
     g = g.dropna(subset=[v, v + "_se"]); g = g[g[v + "_se"] > 0]
     if g.empty: return np.nan, np.nan, np.nan
@@ -168,6 +184,8 @@ def meta_pages(pdf, cfgs):
     if s is not None: meta_spread(pdf, s, col)
     r = read_tables(cfgs, "weir_goudet", "rank_agreement.tsv")
     if r is not None: meta_rank(pdf, r, col)
+    v = read_tables(cfgs, "allele_variance", "by_maf.tsv")
+    if v is not None: meta_variance(pdf, v, col)
     t = read_tables(cfgs, "kin_pheno_cov", "estimates.tsv")
     if t is not None:
         t = t[(t["transform"] == "raw") & (t["covset"] == "base_pcs")] if "base_pcs" in set(t["covset"]) else t
