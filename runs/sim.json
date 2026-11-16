@@ -233,6 +233,14 @@
         "ancestry_round2",
         "phased_hm3"
       ]
+    },
+    "ibd_vs_kinship": {
+      "description": "iLASH IBD relatedness vs GRM / PC-Relate / Weir-Goudet, binned",
+      "dir": "ibd_vs_kinship",
+      "pattern": "none",
+      "needs": [
+        "ilash"
+      ]
     }
   }
 }
