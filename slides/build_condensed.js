@@ -57,8 +57,9 @@ tiles("Structure in each sample", [["ancestry_round2/gate_pcs.png", { r: 0.5 }],
 
 s = content("Ancestry PCA");
 bullets(s, ["bigsnpr bed_autoSVD on 1000G founders, 10 PCs; clumped r² 0.2, long-range LD removed",
-            "cohort projected with OADP (bed_projectPCA), not plink2 --score: with ~500 training samples simple projection shrinks PCs toward 0 (yri 553 kept vs 151, lwk 71 vs 0)",
-            "covariate PCs within each group: fit on unrelated (AoU kinship > 0.1 pairs out), relatives projected back; PCs 1-10 for phenotypes, 1-4 for PC-Relate"], 0.6, 1.4, 5.0, 5.3, 15);
+            "cohort projected with OADP (bed_projectPCA)",
+            "covariate PCs within each group: fit on unrelated (AoU kinship > 0.1 pairs out), relatives projected back",
+            "Used in …"], 0.6, 1.4, 5.0, 5.3, 15);
 label(s, `${EX}: cohort on the 1000G PCs (top), round-2 gate (bottom)`, 5.9, 1.3, 6.8);
 fig(s, "round2_pca/cohort_on_reference.png", 5.9, 1.65, 6.8, 2.55, "cohort on the 1000G PCs");
 fig(s, "ancestry_round2/gate_pcs.png", 5.9, 4.25, 6.8, 2.55, "round-2 gate: kept vs dropped");
