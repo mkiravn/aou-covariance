@@ -82,7 +82,7 @@ class Report:
                      ha="right", va="bottom", fontsize=9, color="#c0392b",
                      alpha=0.9, weight="bold")
         local = os.path.join(self._tmp, f"{name}.png")
-        fig.savefig(local, dpi=130, bbox_inches="tight")
+        fig.savefig(local, dpi=400, bbox_inches="tight")
         uri = f"{self.dir}/{name}.png"
         _put(local, uri)
         self.files.append({"file": f"{name}.png", "kind": "figure", "caption": caption})
