@@ -120,8 +120,11 @@ def meta_rank(pdf, a, col):
     for ax, sc in zip(axes, ["all pairs", "relatedness < 0.1"]):
         for k, pr in enumerate(P):
             g = a[(a["pr"] == pr) & (a["pairs"] == sc)].set_index("run").reindex(runs)
-            ax.scatter(g["spearman"], y + (k - 1) * 0.22, marker=PM[k % 3], s=40, color=[col[r] for r in runs], edgecolor="k", lw=0.5, zorder=3)
-        ax.set(xlabel="Spearman rank correlation", title=sc)
+            ax.scatter(g["spearman"], y + (k - 1) * 0.22, marker=PM[k % 3], s=55, color=[col[r] for r in runs], edgecolor="k", lw=0.5, zorder=3)
+        for yy in y[::2]:
+            ax.axhspan(yy - 0.5, yy + 0.5, color="0.94", zorder=0)   # alternate group bands
+        ax.set(xlabel="Spearman rank correlation", title=sc, xlim=(min(0, a["spearman"].min() - 0.05), 1))
+        ax.grid(axis="x", alpha=0.4); ax.grid(axis="y", visible=False)
     axes[0].set_yticks(y, runs); axes[0].set_ylim(-0.6, len(runs) - 0.4)
     hd = [plt.Line2D([], [], marker=PM[k % 3], ls="", color="0.6", mec="k", label=pr) for k, pr in enumerate(P)]
     fig.legend(handles=hd, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 0.03))

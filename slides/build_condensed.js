@@ -16,6 +16,17 @@ function label(s, t, x, y, w) {
   s.addText(t, { x, y, w, h: 0.3, fontSize: 13, bold: true, color: "444444", margin: 0, isTextBox: true });
 }
 function forGroup(g, cb) { D.setRun(g); cb(); D.setRun(EX); }
+function tiles(title, choices, foot) {   // one cropped panel per group, 4 x 2; choices: [[file, crop], ...] first that exists
+  const s = content(title);
+  GROUPS.slice(0, 8).forEach((g, k) => forGroup(g, () => {
+    const x = 0.6 + (k % 4) * 3.05, y = 1.3 + Math.floor(k / 4) * 2.85;
+    label(s, g, x, y, 2.9);
+    const [file, crop] = choices.find(([f]) => D.exists(f)) || choices[0];
+    fig(s, file, x, y + 0.3, 2.9, 2.45, "", crop);
+  }));
+  if (foot) s.addText(foot, { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+  return s;
+}
 
 // ---------------------------------------------------------------- main
 pres.addSection({ title: "Main" }); D.setSec("Main");
@@ -35,6 +46,15 @@ bullets(s, ["round 1: ellipsoid on AoU's PCs 1-5 around the 1000G superpopulatio
             "round 2: PCA on that superpopulation's 1000G founders, cohort projected (OADP), robust Mahalanobis gate on PCs 1-4 around the target population(s)",
             "mixed sets (uniform_10k, even_10k) skip the gates: they show what structure does to each estimator"], 8.6, 1.4, 4.1, 5.2, 15);
 
+s = content("Round-2 gates: N per 1000G population, and overlap");
+fig(s, "pop_gates/kept_by_population.png", 0.6, 1.3, 12.1, 3.0, "AoU people inside each 1000G population's gate");
+["EAS", "AFR", "SAS"].forEach((sp, k) => fig(s, `pop_gates/overlap_${sp}.png`, 0.6 + k * 4.1, 4.4, 3.9, 2.5, `${sp}: gate overlap (Jaccard)`));
+s.addText("same gate as round 2 (MCD on each population's founders, PCs 1-4, q = 0.999); gates overlap, so rows don't add up; bars under 21 not drawn",
+          { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+
+tiles("Structure in each sample", [["ancestry_round2/gate_pcs.png", { r: 0.5 }], ["round2_pca/cohort_on_reference.png", { r: 0.5 }], ["covariate_pcs/covariate_pc_pairs.png", { r: 0.8 }]],
+      "each sample on round-2 PCs 1-2 against 1000G (gated groups: kept vs dropped; mixed sets: whole sample; asw_10k: its own covariate PCs 1-2); cells with 21+ people");
+
 s = content("Ancestry PCA");
 bullets(s, ["bigsnpr bed_autoSVD on 1000G founders, 10 PCs; clumped r² 0.2, long-range LD removed",
             "cohort projected with OADP (bed_projectPCA), not plink2 --score: with ~500 training samples simple projection shrinks PCs toward 0 (yri 553 kept vs 151, lwk 71 vs 0)",
@@ -53,39 +73,56 @@ bullets(s, ["HapMap3 autosomal SNPs, QC'd within each group",
 fig(s, "meta/f_by_maf.png", 5.4, 1.3, 7.3, 5.5, "all groups: F by MAF bin");
 
 s = content("Three relatedness estimators");
-const cols = [["GRM", "grm", null, "reference: the group's allele frequencies", "Yang et al. 2011 AJHG (GCTA)"],
-              ["PC-Relate", "pcrelate", "pcrelate_mu", "reference: each person's own allele frequencies from PCs 1-4", "Conomos et al. 2016 AJHG"],
-              ["Weir-Goudet", "wg", "wg_m", "reference: the average pair of distinct individuals in the run (S*); no allele frequencies", "Weir & Goudet 2026 Genetics, Box 3"]];
-cols.forEach(([t, e1, e2, ref, ref2], k) => {
-  const x = 0.6 + k * 4.1, w = 3.8;
-  s.addText(t, { x, y: 1.35, w, h: 0.45, fontSize: 20, bold: true, color: C.text1, margin: 0, isTextBox: true });
-  let y = 1.95 + eqw(s, e1, x, 1.95, w, 0.75) + 0.25;
-  if (e2) y += eqw(s, e2, x, y, w, 0.42) + 0.2;
-  s.addText(ref, { x, y: Math.max(y, 3.9), w, h: 1.0, fontSize: 15, color: "333333", margin: 0, valign: "top", isTextBox: true });
-  s.addText(ref2, { x, y: 5.1, w, h: 0.4, fontSize: 12, color: "888888", margin: 0, isTextBox: true });
-});
-eqw(s, "rel", 0.6, 5.8, 6.0, 0.55);
-s.addText("relatedness = 2 × kinship for all three", { x: 6.9, y: 5.85, w: 5.8, h: 0.45, fontSize: 15, color: GREY, isTextBox: true });
+{
+  const F = (24 / 30) / 300, WMAX = 6.4;   // equation images are 30 pt at 300 dpi: shown at 24 pt
+  const put = (k, x, y) => { const d = sz(EQ(k)), f = Math.min(F, WMAX / d.width); s.addImage({ path: EQ(k), x, y, w: d.width * f, h: d.height * f, altText: k, objectName: `eq:${k}` }); return d.height * f; };
+  const rows = [["GRM", ["grm"], "the group's allele frequencies", "Yang et al. 2011 AJHG (GCTA)"],
+                ["PC-Relate", ["pcrelate", "pcrelate_mu"], "each person's own allele frequencies, from PCs 1-4", "Conomos et al. 2016 AJHG"],
+                ["Weir-Goudet", ["wg", "wg_m"], "the average pair of distinct individuals in the run (S*); no allele frequencies", "Weir & Goudet 2026 Genetics, Box 3"]];
+  let y = 1.3;
+  for (const [t, eqs, ref, cit] of rows) {
+    let h = 0; for (const e of eqs) h += put(e, 2.3, y + h) + 0.1;
+    h = Math.max(h, 1.0);
+    s.addText(t, { x: 0.6, y, w: 1.6, h: 0.5, fontSize: 20, bold: true, color: C.text1, margin: 0, isTextBox: true });
+    s.addText([{ text: "reference: ", options: { bold: true } }, { text: ref, options: { breakLine: true } }, { text: cit, options: { fontSize: 12, color: "888888" } }],
+              { x: 9.0, y, w: 3.7, h, fontSize: 15, color: "333333", margin: 0, valign: "top", isTextBox: true });
+    y += h + 0.2;
+    s.addShape(pres.shapes.LINE, { x: 0.6, y: y - 0.1, w: 12.1, h: 0, line: { color: "DDDDDD", width: 0.75 } });
+  }
+  put("rel", 2.3, y + 0.05);
+  s.addText("relatedness = 2 × kinship for all three", { x: 9.0, y: y + 0.05, w: 3.7, h: 0.5, fontSize: 15, color: GREY, margin: 0, isTextBox: true });
+}
 
 s = content("Distributions");
 fig(s, "meta/relatedness_distributions.png", 0.6, 1.3, 7.4, 5.6, "all groups: bulk (top), relatives (bottom, log)");
 fig(s, "meta/relatedness_spread.png", 8.2, 1.3, 4.5, 5.6, "SD and share > 0.1");
 
-s = content("Estimators against each other");
-for (const [k, g] of [[0, EX], [1, MIXED]]) forGroup(g, () => {
-  fig(s, "weir_goudet/estimator_comparison.png", 0.6 + k * 6.15, 1.65, 5.95, 5.0, `${g}: cells by mean PC distance`);
-  label(s, g, 0.6 + k * 6.15, 1.3, 5.9);
-});
+const PER = 6;   // bulk row of the three biplots, 2 x 3 groups per slide
+for (let i = 0; i < GROUPS.length; i += PER) {
+  const s = content(`Estimators against each other${GROUPS.length > PER ? ` (${i / PER + 1}/${Math.ceil(GROUPS.length / PER)})` : ""}`);
+  GROUPS.slice(i, i + PER).forEach((g, k) => forGroup(g, () => {
+    const x = 0.6 + (k % 2) * 6.1, y = 1.25 + Math.floor(k / 2) * 1.9;
+    label(s, g, x, y, 5.9);
+    fig(s, "weir_goudet/estimator_comparison.png", x, y + 0.25, 5.95, 1.6, "", { t: 0.02, b: 0.5 });
+  }));
+  s.addText("bulk (−0.07 to 0.12); left to right: PC-Relate vs GRM, Weir-Goudet vs GRM, Weir-Goudet vs PC-Relate; cells by mean PC distance, black = bin means",
+            { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+}
 
 s = content("Do they rank pairs the same way?");
 fig(s, "meta/rank_agreement.png", 0.6, 1.3, 6.2, 5.6, "all groups: Spearman ρ");
 forGroup(EX, () => fig(s, "weir_goudet/rank_comparison.png", 7.0, 1.65, 5.7, 5.2, "rank vs rank"));
 label(s, `${EX}: rank vs rank, density (top) and PC distance (bottom)`, 7.0, 1.3, 5.7);
 
-s = content(`PC distance and IBD (${EX})`);
-fig(s, "weir_goudet/relatedness_vs_pc_distance.png", 0.6, 1.3, 12.1, 2.7, "relatedness by PC-distance bin");
-fig(s, "ibd_vs_kinship/binned_by_ibd.png", 0.6, 4.1, 7.0, 2.8, "iLASH IBD vs each estimator");
-bullets(s, ["PC distance: Euclidean, round-2 PCs 1-4", "IBD: iLASH segments, no allele frequencies; pairs without segments at 0"], 7.9, 4.2, 4.8, 2.6, 15);
+s = content(`Relatedness and PC distance (${EX})`);
+fig(s, "weir_goudet/relatedness_vs_pc_distance.png", 0.6, 1.3, 12.1, 4.9, "relatedness by PC-distance bin");
+s.addText("PC distance: Euclidean, round-2 PCs 1-4; 40 equal-count bins", { x: 0.6, y: 6.4, w: 11.6, h: 0.4, fontSize: 14, color: GREY, isTextBox: true });
+
+s = content("Relatedness against IBD (chb_chs)");
+D.setRun("chb_chs");
+fig(s, "ibd_vs_kinship/binned_by_ibd.png", 0.6, 1.3, 8.6, 5.5, "iLASH IBD vs each estimator");
+D.setRun(EX);
+bullets(s, ["IBD: iLASH segments, no allele frequencies", "pairs without segments at 0", "cells: pair density (21+ pairs); black: bin means"], 9.4, 1.5, 3.3, 4.0, 15);
 cite(s, "Shemirani et al. 2021 Nat Commun (iLASH)");
 
 s = content("Phenotypes and model");
@@ -97,18 +134,13 @@ bullets(s, ["height, BMI, systolic BP, HDL, LDL, platelets, hemoglobin; most rec
 eqw(s, "cov", 7.8, 1.7, 4.9, 0.55);
 eqw(s, "jk", 7.8, 2.7, 4.9, 0.7);
 
-s = content(`Covariance against relatedness, to 0.1 (${EX})`);
-fig(s, "kin_pheno_cov/binned_covariance_bulk.png", 0.6, 1.3, 12.1, 5.6, "bulk");
-
-s = content(`Covariance against relatedness, to 0.6 (${EX})`);
-fig(s, "kin_pheno_cov/binned_covariance_full.png", 0.6, 1.3, 12.1, 5.6, "full range, ±SE");
+tiles("Covariance against relatedness: height, to 0.1", [["kin_pheno_cov/binned_covariance_bulk.png", { r: 0.76, b: 0.5 }]],
+      "bin means of y_i y_j for GRM, PC-Relate and Weir-Goudet, with fits; other traits per group in the appendix");
+tiles("Covariance against relatedness: height, to 0.6", [["kin_pheno_cov/binned_covariance_full.png", { r: 0.76, b: 0.5 }]],
+      "full range, ±SE; other traits per group in the appendix");
 
 s = content("Fits across groups: all pairs");
 fig(s, "meta/fits_all_pairs.png", 0.6, 1.3, 8.0, 5.6, "slope, intercept, Pearson and Spearman r²");
-bullets(s, ["…", "…"], 8.9, 1.5, 3.8, 5.0, 16);
-
-s = content("Fits across groups: relatedness < 0.1");
-fig(s, "meta/fits_unrelated.png", 0.6, 1.3, 8.0, 5.6, "slope, intercept, Pearson and Spearman r²");
 bullets(s, ["…", "…"], 8.9, 1.5, 3.8, 5.0, 16);
 
 s = pres.addSlide({ masterName: "TITLE", sectionTitle: "Main" });

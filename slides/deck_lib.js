@@ -42,12 +42,18 @@ module.exports = function (FIGDIR) {
   const content = (t) => { const s = pres.addSlide({ masterName: "CONTENT", sectionTitle: sec }); s.addText(t, { placeholder: "title" }); return s; };
 
   const USED = new Set();
-  function place(s, f, file, x, y, w, h, crop) {   // fit inside the box, keep aspect, optional crop
-    const sz = require("image-size")(f), c = { l: 0, t: 0, r: 0, b: 0, ...(crop || CROP[file] || {}) };
-    const cw = sz.width * (1 - c.l - c.r), ch = sz.height * (1 - c.t - c.b), k = Math.min(w / cw, h / ch);
-    const iw = cw * k, ih = ch * k, o = { path: f, x: x + (w - iw) / 2, y: y + (h - ih) / 2, w: iw, h: ih, objectName: `fig:${file}`, altText: file };
-    if (crop || CROP[file]) o.sizing = { type: "crop", x: sz.width * c.l * k, y: sz.height * c.t * k, w: iw, h: ih };
-    s.addImage(o);
+  function place(s, f, file, x, y, w, h, crop) {   // fit inside the box, keep aspect; crop = { l, t, r, b } fractions trimmed (ImageMagick)
+    const c = crop || CROP[file];
+    if (c) {
+      const d0 = require("image-size")(f), q = { l: 0, t: 0, r: 0, b: 0, ...c };
+      const cw = Math.round(d0.width * (1 - q.l - q.r)), ch = Math.round(d0.height * (1 - q.t - q.b));
+      const out = path.join(require("os").tmpdir(), "deck_crops", `${key(file).replace(/[\/]/g, "__")}_${q.l}_${q.t}_${q.r}_${q.b}.png`);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      require("child_process").execFileSync("magick", [f, "-crop", `${cw}x${ch}+${Math.round(d0.width * q.l)}+${Math.round(d0.height * q.t)}`, "+repage", out]);
+      f = out;
+    }
+    const sz = require("image-size")(f), k = Math.min(w / sz.width, h / sz.height), iw = sz.width * k, ih = sz.height * k;
+    s.addImage({ path: f, x: x + (w - iw) / 2, y: y + (h - ih) / 2, w: iw, h: ih, objectName: `fig:${file}`, altText: file });
   }
   const CROP = {};   // file -> { l, t, r, b } fractions to trim, e.g. "round2_pca/loadings.png": { t: 0, b: 0.5 }
   const ORDER = ["chb_chs", "yri", "lwk", "stu_itu_beb", "pjl", "asw_10k", "uniform_10k", "even_10k"];
@@ -110,6 +116,7 @@ module.exports = function (FIGDIR) {
     await applyTheme(OUT, THEME);
     console.log("wrote", OUT);
   }
-  return { pres, C, GREY, GROUPS, EX, USED, CROP, section, content, perGroup, place, fig, eq, bullets, card, cite, hd, supplementary, write,
+  const exists = (file) => !!FIGDIR && fs.existsSync(path.join(FIGDIR, key(file)));
+  return { exists, pres, C, GREY, GROUPS, EX, USED, CROP, section, content, perGroup, place, fig, eq, bullets, card, cite, hd, supplementary, write,
            setSec: (t) => { sec = t; }, getSec: () => sec, setRun: (g) => { RUN = g; } };
 };
