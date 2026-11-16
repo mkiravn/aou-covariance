@@ -146,9 +146,6 @@ s.addText("all pairs; 95% jackknife CIs, clipped at the axis; lwk and yri left o
 s = content("r² across groups");
 fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.7, "Pearson and Spearman r²", { t: 0.48 });
 
-s = pres.addSlide({ masterName: "TITLE", sectionTitle: "Main" });
-s.addText("Takeaways", { placeholder: "title" });
-s.addText("…  ·  …  ·  …", { placeholder: "body" });
 
 // ---------------------------------------------------------------- appendix: per group, then everything else
 section("Appendix", "per group: covariance for every trait");
