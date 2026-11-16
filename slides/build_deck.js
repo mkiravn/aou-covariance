@@ -1,95 +1,12 @@
-// Deck scaffold: node slides/build_deck.js [out.pptx] [figdir]
-// Figure slots are named "fig:<file>"; with figdir, any <figdir>/<file> found is placed in its slot.
-const fs = require("fs"), path = require("path");
-const pptxgen = require("pptxgenjs");
-const { applyTheme } = require(process.env.PPTX_SKILL + "/scripts/apply_theme.js");
-
+// Full deck: node slides/build_deck.js [out.pptx] [figdir]
+// Figure slots are named "fig:<file>"; with figdir (<run>/<stage>/<fig>.png + meta/), figures fill their slots.
+const path = require("path");
 const OUT = process.argv[2] || path.join(__dirname, "relatedness_scaffold.pptx");
-const FIGDIR = process.argv[3];
-const EQ = (k) => path.join(__dirname, "eq", `${k}.png`);
-const THEME = {
-  name: "aoucov-plain", headFontFace: "Calibri", bodyFontFace: "Calibri",
-  colors: { dk1: "1A1A1A", lt1: "FFFFFF", dk2: "444444", lt2: "F2F2F2", accent1: "444444", accent2: "777777",
-            accent3: "999999", accent4: "BBBBBB", accent5: "DDDDDD", accent6: "EEEEEE", hlink: "1F4E79", folHlink: "444444" },
-};
-const pres = new pptxgen();
-pres.layout = "LAYOUT_WIDE";   // 13.33 x 7.5
-pres.theme = { headFontFace: THEME.headFontFace, bodyFontFace: THEME.bodyFontFace };
-pres.title = "Relatedness and phenotypic covariance";
-const C = pres.SchemeColor;
-const GREY = "666666";
-
-pres.defineSlideMaster({ title: "TITLE", background: { color: "FFFFFF" }, objects: [
-  { placeholder: { options: { name: "title", type: "title", align: "left", x: 0.8, y: 2.3, w: 11.5, h: 1.6, fontSize: 36, bold: true, color: C.text1, valign: "bottom" }, text: "" } },
-  { placeholder: { options: { name: "body", type: "body", align: "left", x: 0.8, y: 4.1, w: 11.5, h: 1.0, fontSize: 18, color: C.text2 }, text: "" } },
-] });
-pres.defineSlideMaster({ title: "SECTION", background: { color: "FFFFFF" }, objects: [
-  { placeholder: { options: { name: "title", type: "title", align: "left", x: 0.8, y: 2.8, w: 11.5, h: 1.0, fontSize: 36, bold: true, color: C.text1 }, text: "" } },
-  { placeholder: { options: { name: "body", type: "body", align: "left", x: 0.8, y: 3.8, w: 11.5, h: 0.8, fontSize: 18, color: C.text2 }, text: "" } },
-] });
-pres.defineSlideMaster({ title: "CONTENT", background: { color: "FFFFFF" }, slideNumber: { x: 12.4, y: 7.0, fontSize: 10, color: "999999" }, objects: [
-  { placeholder: { options: { name: "title", type: "title", align: "left", x: 0.6, y: 0.35, w: 12.1, h: 0.8, fontSize: 28, bold: true, color: C.text1, valign: "top" }, text: "" } },
-] });
-
-let sec = "";
-const section = (t, sub) => {
-  sec = t; pres.addSection({ title: t });
-  const s = pres.addSlide({ masterName: "SECTION", sectionTitle: t });
-  s.addText(t, { placeholder: "title" }); if (sub) s.addText(sub, { placeholder: "body" });
-};
-function perGroup(title, draw) {   // one slide per group
-  for (const g of GROUPS) { RUN = g; draw(content(`${title}: ${g}`)); }
-  RUN = EX;
-}
-const content = (t) => { const s = pres.addSlide({ masterName: "CONTENT", sectionTitle: sec }); s.addText(t, { placeholder: "title" }); return s; };
-
-const USED = new Set();
-function place(s, f, file, x, y, w, h) {   // fit inside the box, keep aspect, optional crop
-  const sz = require("image-size")(f), c = { l: 0, t: 0, r: 0, b: 0, ...(CROP[file] || {}) };
-  const cw = sz.width * (1 - c.l - c.r), ch = sz.height * (1 - c.t - c.b), k = Math.min(w / cw, h / ch);
-  const iw = cw * k, ih = ch * k, o = { path: f, x: x + (w - iw) / 2, y: y + (h - ih) / 2, w: iw, h: ih, objectName: `fig:${file}`, altText: file };
-  if (CROP[file]) o.sizing = { type: "crop", x: sz.width * c.l * k, y: sz.height * c.t * k, w: iw, h: ih };
-  s.addImage(o);
-}
-const CROP = {};   // file -> { l, t, r, b } fractions to trim, e.g. "round2_pca/loadings.png": { t: 0, b: 0.5 }
-const ORDER = ["chb_chs", "yri", "lwk", "stu_itu_beb", "pjl", "asw_10k", "uniform_10k", "even_10k"];
-const GROUPS = FIGDIR && fs.existsSync(FIGDIR)
-  ? fs.readdirSync(FIGDIR).filter((d) => d !== "meta" && fs.statSync(path.join(FIGDIR, d)).isDirectory())
-      .sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b))
-  : ["<group>"];
-const EX = GROUPS.includes("chb_chs") ? "chb_chs" : GROUPS[0];   // example group for one-off method slides
-let RUN = EX;
-const key = (file) => (file.startsWith("meta/") ? file : `${RUN}/${file}`);
-function fig(s, file, x, y, w, h, note) {
-  USED.add(key(file));
-  const f = FIGDIR && path.join(FIGDIR, key(file));
-  if (f && fs.existsSync(f)) {
-    place(s, f, file, x, y, w, h);
-    return;
-  }
-  s.addShape(pres.shapes.RECTANGLE, { x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "BBBBBB", width: 1, dashType: "dash" }, objectName: `fig:${file}` });
-  s.addText([{ text: file, options: { fontSize: 14, color: "555555", breakLine: !!note } },
-             ...(note ? [{ text: note, options: { fontSize: 12, color: "888888" } }] : [])],
-            { x, y, w, h, align: "center", valign: "middle", isTextBox: true });
-}
-const hd = (t) => ({ text: t, options: { bold: true, color: "1A1A1A", fill: { color: "F2F2F2" } } });
-function cite(s, t) {
-  s.addText(t, { x: 0.6, y: 6.85, w: 11.6, h: 0.4, fontSize: 11, color: "888888", isTextBox: true });
-}
-function eq(s, k, x, y, h) {
-  const sz = require("image-size")(EQ(k));
-  s.addImage({ path: EQ(k), x, y, h, w: h * sz.width / sz.height, altText: k, objectName: `eq:${k}` });
-}
-function bullets(s, items, x, y, w, h, size = 18) {
-  s.addText(items.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < items.length - 1 } })),
-            { x, y, w, h, fontSize: size, color: C.text1, paraSpaceAfter: 10, valign: "top", isTextBox: true });
-}
-function card(s, x, y, w, h, head, body) {   // plain: bold heading, text below
-  s.addText([{ text: head, options: { bold: true, fontSize: 18, breakLine: true } }, { text: body, options: { fontSize: 16, color: "333333" } }],
-            { x, y, w, h, color: C.text1, valign: "top", paraSpaceAfter: 6, isTextBox: true });
-}
+const D = require("./deck_lib")(process.argv[3]);
+const { pres, C, GREY, GROUPS, EX, section, content, perGroup, fig, eq, bullets, card, cite, hd } = D;
+let sec;
 // ---------------------------------------------------------------- title
-pres.addSection({ title: "Intro" }); sec = "Intro";
+pres.addSection({ title: "Intro" }); D.setSec("Intro"); sec = "Intro";
 let s = pres.addSlide({ masterName: "TITLE", sectionTitle: sec });
 s.addText("Relatedness and phenotypic covariance across AoU ancestry groups", { placeholder: "title" });
 s.addText("GRM, PC-Relate and Weir-Goudet · 8 groups · 7 traits", { placeholder: "body" });
@@ -238,30 +155,12 @@ s = content("Across groups");
 fig(s, "meta/fits_all_pairs.png", 0.6, 1.4, 6.0, 5.5, "all pairs");
 fig(s, "meta/fits_unrelated.png", 6.7, 1.4, 6.0, 5.5, "relatedness < 0.1");
 
-// ---------------------------------------------------------------- supplementary: every other report figure, by group
-if (FIGDIR && fs.existsSync(FIGDIR)) {
-  for (const g of GROUPS) {
-    const root = path.join(FIGDIR, g);
-    const extra = fs.readdirSync(root).filter((d) => fs.statSync(path.join(root, d)).isDirectory()).sort()
-      .flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => f.endsWith(".png")).sort().map((f) => `${d}/${f}`))
-      .filter((f) => !USED.has(`${g}/${f}`));
-    if (!extra.length) continue;
-    section(`Supplementary: ${g}`, "other report figures");
-    for (const f of extra) {
-      const s = content(`${g}: ` + f.replace(".png", "").replace("/", " / ").replace(/_/g, " "));
-      place(s, path.join(root, f), f, 0.6, 1.3, 12.1, 5.6);
-    }
-  }
-}
-
 // ---------------------------------------------------------------- wrap
-pres.addSection({ title: "Wrap-up" }); sec = "Wrap-up";
+D.supplementary();
+pres.addSection({ title: "Wrap-up" }); D.setSec("Wrap-up"); sec = "Wrap-up";
 s = pres.addSlide({ masterName: "TITLE", sectionTitle: sec });
 s.addText("Takeaways", { placeholder: "title" });
 s.addText("…  ·  …  ·  …", { placeholder: "body" });
 
-(async () => {
-  await pres.writeFile({ fileName: OUT });
-  await applyTheme(OUT, THEME);
-  console.log("wrote", OUT);
-})();
+
+D.write(OUT);
