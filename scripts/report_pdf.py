@@ -65,6 +65,7 @@ def read_tables(cfgs, stage, name):
 
 
 FIGDIR = None
+FIT_EXCLUDE = set()
 
 
 def save(pdf, fig, title, caption, name=None):
@@ -147,7 +148,8 @@ def meta_variance(pdf, v, col):
     save(pdf, fig, "All groups: heterozygote deficit F by allele frequency", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. F = variance / 2p(1-p) - 1; single-ancestry panels are HWE-filtered.", name="f_by_maf")
 
 def meta_coef(pdf, t, col, scope):
-    t = t[t["pairs"] == scope]
+    t = t[(t["pairs"] == scope) & ~t["run"].isin(FIT_EXCLUDE)]   # tiny groups: r2 dominated by its ~1/N_pairs bias, CIs off the axis
+    if t.empty: return
     ph = list(dict.fromkeys(t["pheno"])); runs = list(dict.fromkeys(t["run"])); R = len(runs)
     M = [("slope", "slope"), ("intercept", "intercept"), ("r2", "Pearson r2"), ("spearman_r2", "Spearman r2")]
     fig, axes = plt.subplots(4, 3, figsize=(11, 8.5), sharex=True, sharey="row")
@@ -175,7 +177,7 @@ def meta_coef(pdf, t, col, scope):
     hd, lb = axes[0, 0].get_legend_handles_labels()
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 9), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.03))
     save(pdf, fig, f"All groups: fits of y_i y_j on relatedness ({scope})",
-         "raw, base_pcs; 95% delete-block jackknife CIs (clipped at the axis).", name="fits_all_pairs" if scope == "all pairs" else "fits_unrelated")
+         "raw, base_pcs; 95% delete-block jackknife CIs (clipped at the axis)" + (f"; not shown: {', '.join(sorted(FIT_EXCLUDE))} (too few pairs)" if FIT_EXCLUDE else "") + ".", name="fits_all_pairs" if scope == "all pairs" else "fits_unrelated")
 
 
 def meta_pages(pdf, cfgs):
@@ -201,9 +203,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", default=os.path.expanduser(f"~/aucov_runs/report_{datetime.date.today():%Y%m%d}.pdf"))
+    ap.add_argument("--fit-exclude", default="lwk,yri", help="groups left out of the cross-group fit pages")
     ap.add_argument("--figdir", help="also write slide figures here (meta/ + <run>/<stage>/), zipped")
     a = ap.parse_args()
-    global FIGDIR
+    global FIGDIR, FIT_EXCLUDE
+    FIT_EXCLUDE = set(filter(None, a.fit_exclude.split(",")))
     FIGDIR = a.figdir and os.path.expanduser(a.figdir)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
