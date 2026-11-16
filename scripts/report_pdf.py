@@ -203,6 +203,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", default=os.path.expanduser(f"~/aucov_runs/report_{datetime.date.today():%Y%m%d}.pdf"))
+    ap.add_argument("--borrow", default="asw", help="runs whose figures go in the slide bundle only (not in the PDF)")
     ap.add_argument("--fit-exclude", default="lwk,yri", help="groups left out of the cross-group fit pages")
     ap.add_argument("--figdir", help="also write slide figures here (meta/ + <run>/<stage>/), zipped")
     a = ap.parse_args()
@@ -231,7 +232,7 @@ def main():
     print("wrote", a.out)
     if FIGDIR:
         import glob, shutil
-        for run in a.runs:   # <figdir>/<run>/<stage>/<figure>.png, report figures only
+        for run in a.runs + [r for r in a.borrow.split(",") if r and r not in a.runs]:   # <figdir>/<run>/<stage>/<figure>.png, report figures only
             for f in glob.glob(f"{load_run(run).path('report')}/*/*.png"):
                 out = f"{FIGDIR}/{run}/{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
                 os.makedirs(os.path.dirname(out), exist_ok=True); shutil.copyfile(f, out)

@@ -52,8 +52,8 @@ fig(s, "pop_gates/kept_by_population.png", 0.6, 1.3, 12.1, 3.0, "AoU people insi
 s.addText("same gate as round 2 (MCD on each population's founders, PCs 1-4, q = 0.999); gates overlap, so rows don't add up; bars under 21 not drawn",
           { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 
-tiles("Structure in each sample", [["ancestry_round2/gate_pcs.png", { r: 0.5 }], ["round2_pca/cohort_on_reference.png", { r: 0.5 }], ["covariate_pcs/covariate_pc_pairs.png", { r: 0.8 }]],
-      "each sample on round-2 PCs 1-2 against 1000G (gated groups: kept vs dropped; mixed sets: whole sample; asw_10k: its own covariate PCs 1-2); cells with 21+ people");
+tiles("Structure in each sample", [["ancestry_round2/gate_pcs.png", { r: 0.5 }], ["round2_pca/cohort_on_reference.png", { r: 0.5 }], ["@asw/ancestry_round2/gate_pcs.png", { r: 0.5 }], ["covariate_pcs/covariate_pc_pairs.png", { r: 0.8 }]],
+      "each sample on round-2 PCs 1-2 against 1000G (gated groups: kept vs dropped; mixed sets: whole sample; asw_10k: the full ASW gate it was sampled from); cells with 21+ people");
 
 s = content("Ancestry PCA");
 bullets(s, ["bigsnpr bed_autoSVD on 1000G founders, 10 PCs; clumped r² 0.2, long-range LD removed",

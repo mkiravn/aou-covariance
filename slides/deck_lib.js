@@ -58,12 +58,12 @@ module.exports = function (FIGDIR) {
   const CROP = {};   // file -> { l, t, r, b } fractions to trim, e.g. "round2_pca/loadings.png": { t: 0, b: 0.5 }
   const ORDER = ["chb_chs", "yri", "lwk", "stu_itu_beb", "pjl", "asw_10k", "uniform_10k", "even_10k"];
   const GROUPS = FIGDIR && fs.existsSync(FIGDIR)
-    ? fs.readdirSync(FIGDIR).filter((d) => d !== "meta" && fs.statSync(path.join(FIGDIR, d)).isDirectory())
+    ? fs.readdirSync(FIGDIR).filter((d) => d !== "meta" && fs.existsSync(path.join(FIGDIR, d, "weir_goudet")))   // runs used only for borrowed figures (e.g. asw) are not groups
         .sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b))
     : ["<group>"];
   const EX = GROUPS.includes("chb_chs") ? "chb_chs" : GROUPS[0];   // example group for one-off method slides
   let RUN = EX;
-  const key = (file) => (file.startsWith("meta/") ? file : `${RUN}/${file}`);
+  const key = (file) => (file.startsWith("meta/") ? file : file.startsWith("@") ? file.slice(1) : `${RUN}/${file}`);   // "@run/stage/fig.png": another run's figure
   function fig(s, file, x, y, w, h, note, crop) {
     USED.add(key(file));
     const f = FIGDIR && path.join(FIGDIR, key(file));
