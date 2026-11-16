@@ -139,6 +139,14 @@ tiles("Covariance against relatedness: height, to 0.1", [["kin_pheno_cov/binned_
 tiles("Covariance against relatedness: height, to 0.6", [["kin_pheno_cov/binned_covariance_full.png", { r: 0.76, b: 0.5 }]],
       "full range, ±SE; other traits per group in the appendix");
 
+s = content("Slopes by trait and estimator");
+["chb_chs", "asw_10k", "uniform_10k"].filter((g) => GROUPS.includes(g) || !process.argv[3]).forEach((g, k) => forGroup(g, () => {
+  label(s, g, 0.6 + k * 4.1, 1.25, 3.9);
+  fig(s, "kin_pheno_cov/fit_coefficients.png", 0.6 + k * 4.1, 1.55, 3.9, 4.95, "slope panel", { r: 0.515, b: 0.535 });
+}));
+forGroup("chb_chs", () => fig(s, "kin_pheno_cov/fit_coefficients.png", 2.0, 6.5, 9.3, 0.45, "legend", { t: 0.955 }));
+s.addText("95% jackknife CIs", { x: 11.3, y: 6.55, w: 1.4, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+
 s = content("Slopes and intercepts across groups");
 fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.5, "slope, intercept", { b: 0.56 });
 s.addText("all pairs; 95% jackknife CIs, clipped at the axis; lwk and yri left out (too few pairs); colours as on the next slide", { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
