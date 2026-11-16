@@ -97,16 +97,18 @@ s = content("Distributions");
 fig(s, "meta/relatedness_distributions.png", 0.6, 1.3, 7.4, 5.6, "all groups: bulk (top), relatives (bottom, log)");
 fig(s, "meta/relatedness_spread.png", 8.2, 1.3, 4.5, 5.6, "SD and share > 0.1");
 
-const PER = 2;   // bulk row of the three biplots, two groups per slide, full width
-for (let i = 0; i < GROUPS.length; i += PER) {
-  const s = content(`Estimators against each other${GROUPS.length > PER ? ` (${i / PER + 1}/${Math.ceil(GROUPS.length / PER)})` : ""}`);
-  GROUPS.slice(i, i + PER).forEach((g, k) => forGroup(g, () => {
-    const x = 0.6, y = 1.25 + k * 2.85;
-    label(s, g, x, y, 5.9);
-    fig(s, "weir_goudet/estimator_comparison.png", x, y + 0.3, 12.1, 2.5, "", { t: 0.02, b: 0.5 });
-  }));
-  s.addText("bulk (−0.07 to 0.12); left to right: PC-Relate vs GRM, Weir-Goudet vs GRM, Weir-Goudet vs PC-Relate; cells by mean PC distance, black = bin means",
-            { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+const PER = 2;   // the three biplots, two groups per slide, full width: bulk, then the full range
+for (const [part, crop, note] of [["", { t: 0.02, b: 0.5 }, "bulk (−0.07 to 0.12)"], [", full range", { t: 0.525 }, "full range (−0.1 to 0.6)"]]) {
+  for (let i = 0; i < GROUPS.length; i += PER) {
+    const s = content(`Estimators against each other${part}${GROUPS.length > PER ? ` (${i / PER + 1}/${Math.ceil(GROUPS.length / PER)})` : ""}`);
+    GROUPS.slice(i, i + PER).forEach((g, k) => forGroup(g, () => {
+      const y = 1.25 + k * 2.85;
+      label(s, g, 0.6, y, 5.9);
+      fig(s, "weir_goudet/estimator_comparison.png", 0.6, y + 0.3, 12.1, 2.5, "", crop);
+    }));
+    s.addText(`${note}; left to right: PC-Relate vs GRM, Weir-Goudet vs GRM, Weir-Goudet vs PC-Relate; cells by mean PC distance, black = bin means`,
+              { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+  }
 }
 
 s = content("Do they rank pairs the same way?");
@@ -149,11 +151,9 @@ s.addText("Takeaways", { placeholder: "title" });
 s.addText("…  ·  …  ·  …", { placeholder: "body" });
 
 // ---------------------------------------------------------------- appendix: per group, then everything else
-section("Appendix", "per group: the three estimators, and covariance for every trait");
+section("Appendix", "per group: covariance for every trait");
 for (const g of GROUPS) forGroup(g, () => {
-  let a = content(`${g}: estimators against each other`);
-  fig(a, "weir_goudet/estimator_comparison.png", 0.6, 1.3, 12.1, 5.6);
-  a = content(`${g}: covariance against relatedness, to 0.1`);
+  const a = content(`${g}: covariance against relatedness, to 0.1`);
   fig(a, "kin_pheno_cov/binned_covariance_bulk.png", 0.6, 1.3, 12.1, 5.6);
 });
 D.write(OUT);
