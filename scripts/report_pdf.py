@@ -107,6 +107,22 @@ def meta_spread(pdf, s, col):
     save(pdf, fig, "All groups: spread of relatedness", "Off-diagonal pairs, per estimator.")
 
 
+def meta_rank(pdf, a, col):
+    runs = list(dict.fromkeys(a["run"])); y = np.arange(len(runs))[::-1]
+    a = a.assign(pr=a["y"] + " vs " + a["x"]); P = list(dict.fromkeys(a["pr"])); PM = ["o", "s", "^"]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 8.5), sharey=True)
+    fig.subplots_adjust(top=0.9, bottom=0.14, wspace=0.08, left=0.14)
+    for ax, sc in zip(axes, ["all pairs", "relatedness < 0.1"]):
+        for k, pr in enumerate(P):
+            g = a[(a["pr"] == pr) & (a["pairs"] == sc)].set_index("run").reindex(runs)
+            ax.scatter(g["spearman"], y + (k - 1) * 0.22, marker=PM[k % 3], s=40, color=[col[r] for r in runs], edgecolor="k", lw=0.5, zorder=3)
+        ax.set(xlabel="Spearman rank correlation", title=sc)
+    axes[0].set_yticks(y, runs); axes[0].set_ylim(-0.6, len(runs) - 0.4)
+    hd = [plt.Line2D([], [], marker=PM[k % 3], ls="", color="0.6", mec="k", label=pr) for k, pr in enumerate(P)]
+    fig.legend(handles=hd, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 0.03))
+    save(pdf, fig, "All groups: rank agreement between estimators", "Spearman correlation of off-diagonal relatedness; right: pairs with relatedness < 0.1 by all three.")
+
+
 def pooled(g, v):
     g = g.dropna(subset=[v, v + "_se"]); g = g[g[v + "_se"] > 0]
     if g.empty: return np.nan, np.nan, np.nan
@@ -150,6 +166,8 @@ def meta_pages(pdf, cfgs):
     if h is not None: meta_hist(pdf, h, col)
     s = read_tables(cfgs, "weir_goudet", "relatedness_spread.tsv")
     if s is not None: meta_spread(pdf, s, col)
+    r = read_tables(cfgs, "weir_goudet", "rank_agreement.tsv")
+    if r is not None: meta_rank(pdf, r, col)
     t = read_tables(cfgs, "kin_pheno_cov", "estimates.tsv")
     if t is not None:
         t = t[(t["transform"] == "raw") & (t["covset"] == "base_pcs")] if "base_pcs" in set(t["covset"]) else t
