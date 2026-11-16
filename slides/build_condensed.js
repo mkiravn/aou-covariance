@@ -137,7 +137,7 @@ tiles("Covariance against relatedness: height, to 0.6", [["kin_pheno_cov/binned_
       "full range, ±SE; other traits per group in the appendix");
 
 s = content("Slopes and intercepts across groups");
-fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.5, "slope, intercept", { b: 0.5 });
+fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.5, "slope, intercept", { b: 0.535 });
 s.addText("all pairs; 95% jackknife CIs, clipped at the axis; colours as on the next slide", { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 
 s = content("r² across groups");
