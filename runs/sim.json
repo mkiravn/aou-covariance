@@ -169,6 +169,15 @@
         "covariate_pcs"
       ]
     },
+    "kin_pheno_cov": {
+      "description": "y_i y_j on kinship per phenotype and estimator (GRM, PC-Relate, Weir-Goudet): slope, intercept, r2; binned means",
+      "dir": "kin_pheno_cov",
+      "pattern": "estimates.tsv",
+      "needs": [
+        "phenotypes",
+        "grm_shards"
+      ]
+    },
     "crossproducts": {
       "description": "grm_class_tool accumulate, all phenotype combos in one pass per shard",
       "dir": "crossproducts/shards",
