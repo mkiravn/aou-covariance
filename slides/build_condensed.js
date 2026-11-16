@@ -149,19 +149,11 @@ s.addText("Takeaways", { placeholder: "title" });
 s.addText("…  ·  …  ·  …", { placeholder: "body" });
 
 // ---------------------------------------------------------------- appendix: per group, then everything else
-section("Appendix", "per-group figures");
+section("Appendix", "per group: the three estimators, and covariance for every trait");
 for (const g of GROUPS) forGroup(g, () => {
   let a = content(`${g}: estimators against each other`);
   fig(a, "weir_goudet/estimator_comparison.png", 0.6, 1.3, 12.1, 5.6);
-  a = content(`${g}: rank vs rank`);
-  fig(a, "weir_goudet/rank_comparison.png", 0.6, 1.3, 12.1, 5.6);
   a = content(`${g}: covariance against relatedness, to 0.1`);
   fig(a, "kin_pheno_cov/binned_covariance_bulk.png", 0.6, 1.3, 12.1, 5.6);
-  a = content(`${g}: covariance against relatedness, to 0.6`);
-  fig(a, "kin_pheno_cov/binned_covariance_full.png", 0.6, 1.3, 12.1, 5.6);
-  a = content(`${g}: slopes, intercepts, r²`);
-  fig(a, "kin_pheno_cov/fit_coefficients.png", 0.6, 1.3, 6.0, 5.6, "top half", { t: 0, b: 0.5 });
-  fig(a, "kin_pheno_cov/fit_coefficients.png", 6.7, 1.3, 6.0, 5.6, "bottom half", { t: 0.5, b: 0 });
 });
-D.supplementary();
 D.write(OUT);
