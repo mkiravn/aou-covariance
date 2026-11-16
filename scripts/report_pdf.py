@@ -64,7 +64,12 @@ def read_tables(cfgs, stage, name):
     return pd.concat(out) if out else None
 
 
-def save(pdf, fig, title, caption):
+FIGDIR = None
+
+
+def save(pdf, fig, title, caption, name=None):
+    if FIGDIR and name:   # slide copy, without the page title/caption
+        os.makedirs(f"{FIGDIR}/meta", exist_ok=True); fig.savefig(f"{FIGDIR}/meta/{name}.png", bbox_inches="tight")
     fig.text(0.03, 0.975, title, fontsize=13, weight="bold", va="top")
     fig.text(0.03, 0.01, caption, fontsize=9, va="bottom")
     pdf.savefig(fig); plt.close(fig)
@@ -87,7 +92,7 @@ def meta_hist(pdf, h, col):
     axes[0, 0].set_ylabel("density"); axes[1, 0].set_ylabel("density (log)")
     hd, lb = axes[0, 0].get_legend_handles_labels()
     fig.legend(hd, lb, loc="lower center", ncol=len(lb), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.05))
-    save(pdf, fig, "All groups: relatedness distributions", "Off-diagonal pairs; top: bulk, bottom: relatives (log). Bins with 1-20 pairs not drawn.")
+    save(pdf, fig, "All groups: relatedness distributions", "Off-diagonal pairs; top: bulk, bottom: relatives (log). Bins with 1-20 pairs not drawn.", name="relatedness_distributions")
 
 
 def meta_spread(pdf, s, col):
@@ -104,7 +109,7 @@ def meta_spread(pdf, s, col):
     axes[0].set_ylim(-0.6, len(runs) - 0.4)
     hd = [plt.Line2D([], [], marker=MK[e], ls="", color="0.6", mec="k", label=e) for e in EST]
     fig.legend(handles=hd, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 0.03))
-    save(pdf, fig, "All groups: spread of relatedness", "Off-diagonal pairs, per estimator.")
+    save(pdf, fig, "All groups: spread of relatedness", "Off-diagonal pairs, per estimator.", name="relatedness_spread")
 
 
 def meta_rank(pdf, a, col):
@@ -120,7 +125,7 @@ def meta_rank(pdf, a, col):
     axes[0].set_yticks(y, runs); axes[0].set_ylim(-0.6, len(runs) - 0.4)
     hd = [plt.Line2D([], [], marker=PM[k % 3], ls="", color="0.6", mec="k", label=pr) for k, pr in enumerate(P)]
     fig.legend(handles=hd, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 0.03))
-    save(pdf, fig, "All groups: rank agreement between estimators", "Spearman correlation of off-diagonal relatedness; right: pairs with relatedness < 0.1 by all three.")
+    save(pdf, fig, "All groups: rank agreement between estimators", "Spearman correlation of off-diagonal relatedness; right: pairs with relatedness < 0.1 by all three.", name="rank_agreement")
 
 
 def meta_variance(pdf, v, col):
@@ -136,7 +141,7 @@ def meta_variance(pdf, v, col):
     ax.spines[["top", "right"]].set_visible(False); ax.grid(alpha=0.3)
     hd, lb = ax.get_legend_handles_labels()
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 8), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.06))
-    save(pdf, fig, "All groups: heterozygote deficit F by allele frequency", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. F = variance / 2p(1-p) - 1; single-ancestry panels are HWE-filtered.")
+    save(pdf, fig, "All groups: heterozygote deficit F by allele frequency", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. F = variance / 2p(1-p) - 1; single-ancestry panels are HWE-filtered.", name="f_by_maf")
 
 def pooled(g, v):
     g = g.dropna(subset=[v, v + "_se"]); g = g[g[v + "_se"] > 0]
@@ -172,7 +177,7 @@ def meta_coef(pdf, t, col, scope):
     hd, lb = axes[0, 0].get_legend_handles_labels()
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 9), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.03))
     save(pdf, fig, f"All groups: fits of y_i y_j on relatedness ({scope})",
-         "raw, base_pcs; 95% delete-block jackknife CIs; black diamond: inverse-variance-weighted mean across groups.")
+         "raw, base_pcs; 95% delete-block jackknife CIs; black diamond: inverse-variance-weighted mean across groups.", name="fits_all_pairs" if scope == "all pairs" else "fits_unrelated")
 
 
 def meta_pages(pdf, cfgs):
@@ -198,7 +203,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", default=os.path.expanduser(f"~/aucov_runs/report_{datetime.date.today():%Y%m%d}.pdf"))
+    ap.add_argument("--figdir", help="also write slide figures here (meta/ + <stage>/ of --slide-run), zipped")
+    ap.add_argument("--slide-run", default="chb_chs")
     a = ap.parse_args()
+    global FIGDIR
+    FIGDIR = a.figdir and os.path.expanduser(a.figdir)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         text_page(pdf, "Relatedness and phenotypic covariance", [f"runs: {', '.join(a.runs)}", f"compiled {datetime.datetime.now():%Y-%m-%d %H:%M}",
@@ -219,6 +228,14 @@ def main():
                 if stage == "kin_pheno_cov" and os.path.exists(f"{d}/estimates.tsv"):
                     coef_table(pdf, run, f"{d}/estimates.tsv")   # the report copy: counts masked
     print("wrote", a.out)
+    if FIGDIR:
+        import glob, shutil
+        for run in [a.slide_run] + [r for r in a.runs if r != a.slide_run]:   # slide run first; others only fill stages it lacks
+            for f in glob.glob(f"{load_run(run).path('report')}/*/*.png"):
+                out = f"{FIGDIR}/{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
+                if not os.path.exists(out):
+                    os.makedirs(os.path.dirname(out), exist_ok=True); shutil.copyfile(f, out)
+        print("wrote", shutil.make_archive(FIGDIR, "zip", FIGDIR))
 
 
 if __name__ == "__main__":
