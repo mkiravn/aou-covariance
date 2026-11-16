@@ -143,13 +143,6 @@ def meta_variance(pdf, v, col):
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 8), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.06))
     save(pdf, fig, "All groups: heterozygote deficit F by allele frequency", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. F = variance / 2p(1-p) - 1; single-ancestry panels are HWE-filtered.", name="f_by_maf")
 
-def pooled(g, v):
-    g = g.dropna(subset=[v, v + "_se"]); g = g[g[v + "_se"] > 0]
-    if g.empty: return np.nan, np.nan, np.nan
-    w = 1 / g[v + "_se"] ** 2; m = (w * g[v]).sum() / w.sum(); se = w.sum() ** -0.5
-    return m, m - 1.96 * se, m + 1.96 * se
-
-
 def meta_coef(pdf, t, col, scope):
     t = t[t["pairs"] == scope]
     ph = list(dict.fromkeys(t["pheno"])); runs = list(dict.fromkeys(t["run"])); R = len(runs)
@@ -162,22 +155,24 @@ def meta_coef(pdf, t, col, scope):
             if v not in t: ax.set_visible(False); continue
             for k, run in enumerate(runs):
                 g = t[(t["estimator"] == e) & (t["run"] == run)].set_index("pheno").reindex(ph)
-                x = np.arange(len(ph)) - 0.08 + (k - (R - 1) / 2) * 0.55 / max(R - 1, 1)
+                x = np.arange(len(ph)) + (k - (R - 1) / 2) * 0.7 / max(R - 1, 1)
                 ax.errorbar(x, g[v], yerr=[(g[v] - g[v + "_lo"]).clip(lower=0), (g[v + "_hi"] - g[v]).clip(lower=0)],
                             fmt="o", ms=3, lw=0.8, color=col[run], label=run)
-            for xi, p_ in enumerate(ph):
-                m, lo, hi = pooled(t[(t["estimator"] == e) & (t["pheno"] == p_)], v)
-                ax.errorbar(xi + 0.36, m, yerr=[[m - lo], [hi - m]], fmt="D", ms=5, color="k", lw=1.2, label="pooled" if xi == 0 else None)
             if v.endswith("r2"): ax.set_yscale("log")
             elif v != "intercept": ax.axhline(0, color="0.5", lw=0.6)
             if r == 0: ax.set_title(e)
             if c == 0: ax.set_ylabel(lab)
             ax.set_xticks(range(len(ph)), ph, rotation=40, ha="right", fontsize=8)
             for xi in range(1, len(ph)): ax.axvline(xi - 0.5, color="0.9", lw=0.6, zorder=0)
+    axes[0, 0].set_ylim(-0.5, 1.2)   # small groups' CIs run off the edge
+    iv = t["intercept"].dropna()
+    if len(iv):   # intercepts: range of the point estimates, not the CIs
+        pad = 0.15 * (iv.max() - iv.min() or abs(iv).max() or 1e-3)
+        axes[1, 0].set_ylim(iv.min() - pad, iv.max() + pad)
     hd, lb = axes[0, 0].get_legend_handles_labels()
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 9), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.03))
     save(pdf, fig, f"All groups: fits of y_i y_j on relatedness ({scope})",
-         "raw, base_pcs; 95% delete-block jackknife CIs; black diamond: inverse-variance-weighted mean across groups.", name="fits_all_pairs" if scope == "all pairs" else "fits_unrelated")
+         "raw, base_pcs; 95% delete-block jackknife CIs (clipped at the axis).", name="fits_all_pairs" if scope == "all pairs" else "fits_unrelated")
 
 
 def meta_pages(pdf, cfgs):
@@ -203,8 +198,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", default=os.path.expanduser(f"~/aucov_runs/report_{datetime.date.today():%Y%m%d}.pdf"))
-    ap.add_argument("--figdir", help="also write slide figures here (meta/ + <stage>/ of --slide-run), zipped")
-    ap.add_argument("--slide-run", default="chb_chs")
+    ap.add_argument("--figdir", help="also write slide figures here (meta/ + <run>/<stage>/), zipped")
     a = ap.parse_args()
     global FIGDIR
     FIGDIR = a.figdir and os.path.expanduser(a.figdir)
@@ -230,11 +224,10 @@ def main():
     print("wrote", a.out)
     if FIGDIR:
         import glob, shutil
-        for run in [a.slide_run] + [r for r in a.runs if r != a.slide_run]:   # slide run first; others only fill stages it lacks
+        for run in a.runs:   # <figdir>/<run>/<stage>/<figure>.png, report figures only
             for f in glob.glob(f"{load_run(run).path('report')}/*/*.png"):
-                out = f"{FIGDIR}/{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
-                if not os.path.exists(out):
-                    os.makedirs(os.path.dirname(out), exist_ok=True); shutil.copyfile(f, out)
+                out = f"{FIGDIR}/{run}/{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
+                os.makedirs(os.path.dirname(out), exist_ok=True); shutil.copyfile(f, out)
         print("wrote", shutil.make_archive(FIGDIR, "zip", FIGDIR))
 
 

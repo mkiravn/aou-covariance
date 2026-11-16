@@ -37,6 +37,10 @@ const section = (t, sub) => {
   const s = pres.addSlide({ masterName: "SECTION", sectionTitle: t });
   s.addText(t, { placeholder: "title" }); if (sub) s.addText(sub, { placeholder: "body" });
 };
+function perGroup(title, draw) {   // one slide per group
+  for (const g of GROUPS) { RUN = g; draw(content(`${title}: ${g}`)); }
+  RUN = EX;
+}
 const content = (t) => { const s = pres.addSlide({ masterName: "CONTENT", sectionTitle: sec }); s.addText(t, { placeholder: "title" }); return s; };
 
 const USED = new Set();
@@ -48,9 +52,17 @@ function place(s, f, file, x, y, w, h) {   // fit inside the box, keep aspect, o
   s.addImage(o);
 }
 const CROP = {};   // file -> { l, t, r, b } fractions to trim, e.g. "round2_pca/loadings.png": { t: 0, b: 0.5 }
+const ORDER = ["chb_chs", "yri", "lwk", "stu_itu_beb", "pjl", "asw_10k", "uniform_10k", "even_10k"];
+const GROUPS = FIGDIR && fs.existsSync(FIGDIR)
+  ? fs.readdirSync(FIGDIR).filter((d) => d !== "meta" && fs.statSync(path.join(FIGDIR, d)).isDirectory())
+      .sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b))
+  : ["<group>"];
+const EX = GROUPS.includes("chb_chs") ? "chb_chs" : GROUPS[0];   // example group for one-off method slides
+let RUN = EX;
+const key = (file) => (file.startsWith("meta/") ? file : `${RUN}/${file}`);
 function fig(s, file, x, y, w, h, note) {
-  USED.add(file);
-  const f = FIGDIR && path.join(FIGDIR, file);
+  USED.add(key(file));
+  const f = FIGDIR && path.join(FIGDIR, key(file));
   if (f && fs.existsSync(f)) {
     place(s, f, file, x, y, w, h);
     return;
@@ -98,7 +110,7 @@ bullets(s, ["AoU's premade 16 PCs (ancestry predictions), 1000G projected on the
             "gate: ellipsoid on PCs 1-5 around the 1000G superpopulation (e.g. EAS)",
             "radius: 99% quantile of the reference founders' distances",
             "keeps the broad continental group, still structured inside"], 0.6, 1.5, 5.6, 5.0, 17);
-fig(s, "ancestry_round1/gate_pcs.png", 6.5, 1.4, 6.2, 5.4, "gate on AoU PCs");
+fig(s, "ancestry_round1/gate_pcs.png", 6.5, 1.4, 6.2, 5.4, "gate on AoU PCs (" + EX + ")");
 
 s = content("Round 2: PCA on 1000G, cohort projected");
 cite(s, "Privé et al. 2018 Bioinformatics (bigsnpr); Privé et al. 2020 Bioinformatics (OADP projection); Rousseeuw & Van Driessen 1999 Technometrics (MCD)");
@@ -107,11 +119,11 @@ bullets(s, ["PCA (bigsnpr bed_autoSVD) on 1000G founders of the superpopulation,
             "round-1 set projected with OADP (bed_projectPCA)",
             "changed from plink2 --score: with ~500 training samples, simple projection shrinks PCs toward 0 past PC4",
             "gate: robust (MCD) Mahalanobis distance on PCs 1-4 around the target 1000G population(s), radius √χ²₄(0.999)"], 0.6, 1.5, 5.6, 5.2, 17);
-fig(s, "round2_pca/cohort_on_reference.png", 6.5, 1.4, 6.2, 2.6, "cohort on the 1000G PCs");
-fig(s, "ancestry_round2/gate_pcs.png", 6.5, 4.2, 6.2, 2.6, "kept vs dropped");
+fig(s, "round2_pca/cohort_on_reference.png", 6.5, 1.4, 6.2, 2.6, "cohort on the 1000G PCs (" + EX + ")");
+fig(s, "ancestry_round2/gate_pcs.png", 6.5, 4.2, 6.2, 2.6, "kept vs dropped (" + EX + ")");
 
 s = content("Round 2 PCA checks");
-fig(s, "round2_pca/scree.png", 0.6, 1.4, 4.0, 2.6, "scree");
+fig(s, "round2_pca/scree.png", 0.6, 1.4, 4.0, 2.6, "scree (" + EX + ")");
 fig(s, "round2_pca/simple_vs_oadp.png", 4.75, 1.4, 4.0, 2.6, "simple vs OADP projection");
 fig(s, "round2_pca/reference_scores.png", 8.9, 1.4, 3.8, 2.6, "1000G reference");
 fig(s, "round2_pca/loadings.png", 0.6, 4.2, 12.1, 2.6, "|loadings| along the genome: no peaks");
@@ -142,7 +154,7 @@ s = content("QC");
 card(s, 0.6, 1.4, 5.8, 2.6, "samples", "AoU srWGS callset (AoU's own sample QC); ancestry gates in rounds 1 and 2; relatives kept throughout");
 card(s, 0.6, 4.1, 5.8, 2.6, "variants (GRM panel)", "HapMap3 autosomal SNPs; missingness ≤ 5%; MAF ≥ 1%; HWE p ≥ 1e-6 in single-ancestry groups, none in mixed sets; QC'd within each group");
 card(s, 6.9, 1.4, 5.8, 2.6, "for PCA only", "long-range LD regions removed; clumped (r² 0.2 on 1000G, r² 0.1 within groups); autoSVD drops SNPs with loading peaks");
-fig(s, "grm_panel/variants_by_step.png", 6.9, 4.1, 5.8, 2.6, "variants left after each QC step");
+fig(s, "grm_panel/variants_by_step.png", 6.9, 4.1, 5.8, 2.6, "variants left after each QC step (" + EX + ")");
 
 s = content("Covariate PCs, within each group");
 cite(s, "Privé et al. 2018 Bioinformatics (bigsnpr, autoSVD); Privé et al. 2020 Bioinformatics (projection)");
@@ -150,8 +162,8 @@ bullets(s, ["bed_autoSVD on the group's HapMap3 common SNPs, clumped at r² 0.1,
             "fit on unrelated people: both members of every pair with AoU kinship > 0.1 left out",
             "relatives projected back (bed_projectSelfPCA): nobody dropped",
             "PCs 1-10: phenotype residualisation; PCs 1-4: PC-Relate"], 0.6, 1.5, 5.6, 5.2, 17);
-fig(s, "covariate_pcs/covariate_pcs.png", 6.5, 1.4, 6.2, 2.6, "scree, fit vs projected");
-fig(s, "covariate_pcs/covariate_pc_pairs.png", 6.5, 4.2, 6.2, 2.6, "PC pairs, density");
+fig(s, "covariate_pcs/covariate_pcs.png", 6.5, 1.4, 6.2, 2.6, "scree, fit vs projected (" + EX + ")");
+fig(s, "covariate_pcs/covariate_pc_pairs.png", 6.5, 4.2, 6.2, 2.6, "PC pairs, density (" + EX + ")");
 
 s = content("Genotypes against HWE");
 eq(s, "F", 0.6, 1.5, 0.75);
@@ -190,12 +202,11 @@ s = content("Distributions");
 fig(s, "meta/relatedness_distributions.png", 0.6, 1.4, 8.4, 5.4, "all groups: bulk and relatives");
 fig(s, "meta/relatedness_spread.png", 9.3, 1.4, 3.4, 5.4, "SD, share > 0.1");
 
-s = content("Estimators against each other");
-fig(s, "weir_goudet/estimator_comparison.png", 0.6, 1.4, 12.1, 5.5, "chb_chs: hexes by PC distance, black = bin means");
+perGroup("Estimators against each other", (s) => fig(s, "weir_goudet/estimator_comparison.png", 0.6, 1.3, 12.1, 5.6, "cells by mean PC distance, black = bin means"));
 
 s = content("Do they rank pairs the same way?");
-fig(s, "weir_goudet/rank_comparison.png", 0.6, 1.4, 8.2, 5.5, "chb_chs: rank vs rank, density and PC distance");
-fig(s, "meta/rank_agreement.png", 9.1, 1.4, 3.6, 5.5, "all groups: Spearman ρ");
+fig(s, "meta/rank_agreement.png", 0.6, 1.3, 12.1, 5.6, "all groups: Spearman ρ");
+perGroup("Rank against rank", (s) => fig(s, "weir_goudet/rank_comparison.png", 0.6, 1.3, 12.1, 5.6, "top: pair density, bottom: mean PC distance"));
 
 s = content("Relatedness and PC distance");
 fig(s, "weir_goudet/relatedness_vs_pc_distance.png", 0.6, 1.4, 6.0, 5.0, "relatedness by PC-distance bin");
@@ -214,29 +225,31 @@ bullets(s, ["height, BMI, systolic BP, HDL, LDL, platelets, hemoglobin", "most r
 eq(s, "cov", 0.6, 5.3, 0.65);
 card(s, 8.0, 1.5, 4.7, 3.4, "two scopes", "all pairs, and pairs with relatedness < 0.1 (the 'unrelated' slope)");
 
-s = content("Covariance against relatedness");
-fig(s, "kin_pheno_cov/binned_covariance_bulk.png", 0.6, 1.4, 6.0, 5.5, "bulk: relatedness to 0.1");
-fig(s, "kin_pheno_cov/binned_covariance_full.png", 6.7, 1.4, 6.0, 5.5, "full: relatedness to 0.6, ±SE");
+perGroup("Covariance, relatedness to 0.1", (s) => fig(s, "kin_pheno_cov/binned_covariance_bulk.png", 0.6, 1.3, 12.1, 5.6, "bulk"));
+perGroup("Covariance, relatedness to 0.6", (s) => fig(s, "kin_pheno_cov/binned_covariance_full.png", 0.6, 1.3, 12.1, 5.6, "full range, ±SE"));
 
 s = content("Slopes, intercepts, r²");
-fig(s, "kin_pheno_cov/fit_coefficients.png", 0.6, 1.4, 8.0, 5.5, "chb_chs: per trait and estimator");
-eq(s, "jk", 8.9, 1.6, 0.7);
-bullets(s, ["delete-block jackknife: people in 50 random blocks", "drop every pair touching a block", "95% CI, t on 49 df", "Pearson and Spearman r²"], 8.9, 2.5, 3.8, 4.0, 15);
+eq(s, "jk", 0.6, 1.6, 0.8);
+bullets(s, ["delete-block jackknife: people in 50 random blocks", "drop every pair touching a block", "95% CI, t on 49 df", "Pearson and Spearman r²"], 0.6, 2.8, 12.1, 3.5, 18);
+
+perGroup("Slopes, intercepts, r²", (s) => fig(s, "kin_pheno_cov/fit_coefficients.png", 0.6, 1.3, 12.1, 5.6, "per trait and estimator, 95% CI"));
 
 s = content("Across groups");
-fig(s, "meta/fits_all_pairs.png", 0.6, 1.4, 6.0, 5.5, "all pairs; ◆ inverse-variance pooled");
+fig(s, "meta/fits_all_pairs.png", 0.6, 1.4, 6.0, 5.5, "all pairs");
 fig(s, "meta/fits_unrelated.png", 6.7, 1.4, 6.0, 5.5, "relatedness < 0.1");
 
-// ---------------------------------------------------------------- supplementary: every other report figure in the bundle
+// ---------------------------------------------------------------- supplementary: every other report figure, by group
 if (FIGDIR && fs.existsSync(FIGDIR)) {
-  const extra = fs.readdirSync(FIGDIR).filter((d) => fs.statSync(path.join(FIGDIR, d)).isDirectory()).sort()
-    .flatMap((d) => fs.readdirSync(path.join(FIGDIR, d)).filter((f) => f.endsWith(".png")).sort().map((f) => `${d}/${f}`))
-    .filter((f) => !USED.has(f));
-  if (extra.length) {
-    section("Supplementary", "other report figures");
+  for (const g of GROUPS) {
+    const root = path.join(FIGDIR, g);
+    const extra = fs.readdirSync(root).filter((d) => fs.statSync(path.join(root, d)).isDirectory()).sort()
+      .flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => f.endsWith(".png")).sort().map((f) => `${d}/${f}`))
+      .filter((f) => !USED.has(`${g}/${f}`));
+    if (!extra.length) continue;
+    section(`Supplementary: ${g}`, "other report figures");
     for (const f of extra) {
-      const s = content(f.replace(".png", "").replace("/", ": ").replace(/_/g, " "));
-      place(s, path.join(FIGDIR, f), f, 0.6, 1.3, 12.1, 5.6);
+      const s = content(`${g}: ` + f.replace(".png", "").replace("/", " / ").replace(/_/g, " "));
+      place(s, path.join(root, f), f, 0.6, 1.3, 12.1, 5.6);
     }
   }
 }
