@@ -97,26 +97,23 @@ s = content("Distributions");
 fig(s, "meta/relatedness_distributions.png", 0.6, 1.3, 7.4, 5.6, "all groups: bulk (top), relatives (bottom, log)");
 fig(s, "meta/relatedness_spread.png", 8.2, 1.3, 4.5, 5.6, "SD and share > 0.1");
 
-const PER = 6;   // bulk row of the three biplots, 2 x 3 groups per slide
+const PER = 2;   // bulk row of the three biplots, two groups per slide, full width
 for (let i = 0; i < GROUPS.length; i += PER) {
   const s = content(`Estimators against each other${GROUPS.length > PER ? ` (${i / PER + 1}/${Math.ceil(GROUPS.length / PER)})` : ""}`);
   GROUPS.slice(i, i + PER).forEach((g, k) => forGroup(g, () => {
-    const x = 0.6 + (k % 2) * 6.1, y = 1.25 + Math.floor(k / 2) * 1.9;
+    const x = 0.6, y = 1.25 + k * 2.85;
     label(s, g, x, y, 5.9);
-    fig(s, "weir_goudet/estimator_comparison.png", x, y + 0.25, 5.95, 1.6, "", { t: 0.02, b: 0.5 });
+    fig(s, "weir_goudet/estimator_comparison.png", x, y + 0.3, 12.1, 2.5, "", { t: 0.02, b: 0.5 });
   }));
   s.addText("bulk (−0.07 to 0.12); left to right: PC-Relate vs GRM, Weir-Goudet vs GRM, Weir-Goudet vs PC-Relate; cells by mean PC distance, black = bin means",
             { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 }
 
 s = content("Do they rank pairs the same way?");
-fig(s, "meta/rank_agreement.png", 0.6, 1.3, 6.2, 5.6, "all groups: Spearman ρ");
-forGroup(EX, () => fig(s, "weir_goudet/rank_comparison.png", 7.0, 1.65, 5.7, 5.2, "rank vs rank"));
-label(s, `${EX}: rank vs rank, density (top) and PC distance (bottom)`, 7.0, 1.3, 5.7);
+fig(s, "meta/rank_agreement.png", 0.6, 1.3, 12.1, 5.6, "all groups: Spearman ρ");
 
-s = content(`Relatedness and PC distance (${EX})`);
-fig(s, "weir_goudet/relatedness_vs_pc_distance.png", 0.6, 1.3, 12.1, 4.9, "relatedness by PC-distance bin");
-s.addText("PC distance: Euclidean, round-2 PCs 1-4; 40 equal-count bins", { x: 0.6, y: 6.4, w: 11.6, h: 0.4, fontSize: 14, color: GREY, isTextBox: true });
+tiles("Relatedness against PC distance", [["weir_goudet/relatedness_vs_pc_distance.png", { r: 0.5 }]],
+      "mean relatedness in 40 equal-count bins of PC distance (Euclidean, round-2 PCs 1-4); GRM, PC-Relate, Weir-Goudet");
 
 s = content("Relatedness against IBD (chb_chs)");
 D.setRun("chb_chs");
@@ -139,9 +136,12 @@ tiles("Covariance against relatedness: height, to 0.1", [["kin_pheno_cov/binned_
 tiles("Covariance against relatedness: height, to 0.6", [["kin_pheno_cov/binned_covariance_full.png", { r: 0.76, b: 0.5 }]],
       "full range, ±SE; other traits per group in the appendix");
 
-s = content("Fits across groups: all pairs");
-fig(s, "meta/fits_all_pairs.png", 0.6, 1.3, 8.0, 5.6, "slope, intercept, Pearson and Spearman r²");
-bullets(s, ["…", "…"], 8.9, 1.5, 3.8, 5.0, 16);
+s = content("Slopes and intercepts across groups");
+fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.5, "slope, intercept", { b: 0.5 });
+s.addText("all pairs; 95% jackknife CIs, clipped at the axis; colours as on the next slide", { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
+
+s = content("r² across groups");
+fig(s, "meta/fits_all_pairs.png", 0.6, 1.25, 12.1, 5.7, "Pearson and Spearman r²", { t: 0.48 });
 
 s = pres.addSlide({ masterName: "TITLE", sectionTitle: "Main" });
 s.addText("Takeaways", { placeholder: "title" });
