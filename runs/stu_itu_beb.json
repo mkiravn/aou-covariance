@@ -78,7 +78,12 @@
   "lists": {
     "phenotypes": [
       "height",
-      "bmi"
+      "bmi",
+      "systolic_bp",
+      "hdl_cholesterol",
+      "ldl_cholesterol",
+      "platelet_count",
+      "hemoglobin"
     ],
     "transforms": [
       "raw",
