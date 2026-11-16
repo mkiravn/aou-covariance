@@ -56,7 +56,7 @@ def main():
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         text_page(pdf, "Relatedness and phenotypic covariance", [f"runs: {', '.join(a.runs)}", f"compiled {datetime.datetime.now():%Y-%m-%d %H:%M}",
-                  "Aggregate figures only: bins and hexagons with 21+ pairs; counts 1-20 masked.", "Relatedness = 2 x kinship (full sibs 0.5)."])
+                  "Aggregate figures only: bins and hexagons with 21+ pairs; counts 1-20 masked.", "Relatedness = 2 x kinship."])
         for run in a.runs:
             cfg = load_run(run)
             for stage, title in STAGES:
