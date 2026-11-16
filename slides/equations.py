@@ -10,7 +10,8 @@ EQ = {
     "wg": r"$\hat k_{jj'S^*}=\frac{\tilde A_{jj'}-\tilde A_{S^*}}{1-\tilde A_{S^*}}$",
     "wg_m": r"$\tilde A_{jj'}=\frac{1}{L}\sum_l \frac{1+(X_{jl}-1)(X_{j'l}-1)}{2},\quad \tilde A_{S^*}=\mathrm{mean}_{j\neq j'}\,\tilde A_{jj'}$",
     "rel": r"$r_{jj'}=A_{jj'}=2\hat\phi_{jj'}=2\hat k_{jj'S^*}$",
-    "cov": r"$y_i\,y_j=a+b\,r_{ij}+\varepsilon_{ij}$",
+    "cov": r"$y_i\,y_j=a+b\,x_{ij}+\varepsilon_{ij}$",
+    "h2": r"${\hat{h}}^{2}=\hat{b}$",
     "jk": r"$\mathrm{SE}=\sqrt{\frac{B-1}{B}\sum_{b}(\hat\theta_{(b)}-\bar\theta)^2},\quad B=50$",
     "F": r"$F=1-\frac{H_{\mathrm{obs}}}{2p(1-p)}=\frac{\mathrm{Var}(x)}{2p(1-p)}-1$",
 }

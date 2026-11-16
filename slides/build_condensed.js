@@ -129,7 +129,8 @@ bullets(s, ["height, BMI, systolic BP, HDL, LDL, platelets, hemoglobin; most rec
             "delete-block jackknife: people in 50 random blocks, drop pairs touching a block; 95% CI, t on 49 df",
             "Pearson and Spearman r²"], 0.6, 1.4, 6.8, 5.3, 16);
 eqw(s, "cov", 7.8, 1.7, 4.9, 0.55);
-eqw(s, "jk", 7.8, 2.7, 4.9, 0.7);
+eqw(s, "h2", 7.8, 2.6, 4.9, 0.5);
+s.addText("x_ij: relatedness (2 × kinship) of i and j; y standardised, so the slope estimates h²", { x: 7.8, y: 3.3, w: 4.9, h: 0.8, fontSize: 14, color: GREY, margin: 0, isTextBox: true });
 
 tiles("Covariance against relatedness: height, to 0.1", [["kin_pheno_cov/binned_covariance_bulk.png", { r: 0.76, b: 0.5 }]],
       "bin means of y_i y_j for GRM, PC-Relate and Weir-Goudet, with fits; other traits per group in the appendix");
