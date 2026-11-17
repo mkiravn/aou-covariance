@@ -1,6 +1,6 @@
 // Condensed deck, ~14 slides + appendix: node slides/build_condensed.js [out.pptx] [figdir]
 const path = require("path");
-const OUT = process.argv[2] || path.join(__dirname, "relatedness_condensed.pptx");
+const OUT = process.argv[2] || path.join(__dirname, "relatedness_condensed.pptx");   // never point this at a deck the user has edited
 const D = require("./deck_lib")(process.argv[3]);
 const { pres, C, GREY, GROUPS, EX, section, content, perGroup, fig, bullets, card, cite, hd } = D;
 const sz = require("image-size");
@@ -20,8 +20,10 @@ function tiles(title, choices, foot) {   // one cropped panel per group, 4 x 2; 
   const s = content(title);
   GROUPS.slice(0, 8).forEach((g, k) => forGroup(g, () => {
     const x = 0.6 + (k % 4) * 3.05, y = 1.3 + Math.floor(k / 4) * 2.85;
+    const hit = choices.find(([f]) => D.exists(f));
+    if (!hit && process.argv[3]) return;   // no figure for this group: leave the tile out
     label(s, g, x, y, 2.9);
-    const [file, crop] = choices.find(([f]) => D.exists(f)) || choices[0];
+    const [file, crop] = hit || choices[0];
     fig(s, file, x, y + 0.3, 2.9, 2.45, "", crop);
   }));
   if (foot) s.addText(foot, { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
@@ -69,8 +71,8 @@ bullets(s, ["HapMap3 autosomal SNPs, QC'd within each group",
             "missingness ≤ 5%, MAF ≥ 1%",
             "HWE p ≥ 1e-6 in single-ancestry groups; none in mixed sets",
             "same SNP panel for all three estimators",
-            "observed genotype SD against its HWE expectation √(2p(1−p)), across SNPs"], 0.6, 1.4, 4.6, 5.3, 16);
-fig(s, "meta/sd_correlation.png", 5.4, 1.3, 7.3, 5.5, "all groups: correlation of SD with √(2p(1−p))");
+            "observed genotype variance against its HWE expectation 2p(1−p), every SNP: homogeneous group (top) vs mixed set (bottom)"], 0.6, 1.4, 4.6, 5.3, 16);
+for (const [k, g] of [[0, EX], [1, GROUPS.includes("even_10k") ? "even_10k" : MIXED]]) forGroup(g, () => fig(s, "allele_variance/variance_vs_2pq.png", 6.6, 1.25 + k * 2.9, 4.6, 2.8, `${g}: variance vs 2p(1-p)`));
 
 s = content("Three relatedness estimators");
 {
