@@ -53,19 +53,28 @@ KEY.forEach((g, k) => forGroup(g, () => {
 foot(s, "left: bulk, right: full range; cells (21+ pairs) by mean PC distance; black: bin means; dotted: y = x; other groups in the appendix");
 
 s = content("Relatedness against PC distance");
-if (OLD("@grm_wg/relatedness_vs_pc_distance.png")) tiles(s, "weir_goudet/relatedness_vs_pc_distance.png", { r: 0.5 }, GROUPS); else fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 0.6, 1.25, 12.1, 5.6, "");
+if (OLD("@grm_wg/relatedness_vs_pc_distance.png")) tiles(s, "weir_goudet/relatedness_vs_pc_distance.png", { r: 0.5 }, GROUPS);
+else if (process.env.PCD_TWO) {   // figure with only chb_chs and uniform_10k drawn: show those two panels large
+  fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 0.6, 1.3, 5.9, 5.0, "", { r: 0.74, b: 0.5 });
+  fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 6.8, 1.3, 5.9, 5.0, "", { l: 0.5, r: 0.24, t: 0.45, b: 0.06 });
+  s.addText([{ text: "● GRM", options: { color: "E69F00", bold: true } }, { text: "    ▲ Weir-Goudet", options: { color: "009E73", bold: true } }, { text: "    x: PC distance, y: mean relatedness; other groups after the weir_goudet rerun", options: { color: "444444" } }],
+            { x: 0.6, y: 6.4, w: 12.1, h: 0.4, fontSize: 14, align: "center", isTextBox: true });
+} else fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 0.6, 1.25, 12.1, 5.6, "");
 foot(s, "mean relatedness in 40 equal-count bins of PC distance (Euclidean, round-2 PCs 1-4)");
 
 s = content("Height: covariance against relatedness");
 if (OLD("@grm_wg/covariance_bulk.png")) tiles(s, "kin_pheno_cov/binned_covariance_bulk.png", { r: 0.76, b: 0.5 }, GROUPS); else fig(s, "@grm_wg/covariance_bulk.png", 0.6, 1.25, 12.1, 5.6, "");
 foot(s, "bin means of y_i y_j (residualised, standardised height) with least-squares fits over all pairs; relatedness to 0.1");
 
-s = content(PROVISIONAL ? "Slopes by trait (height: top row)" : "Height: slope and intercept");
+s = content(PROVISIONAL ? "Slopes by trait (height: top row)" : "Height: slope (ĥ²) by group");
 if (PROVISIONAL) ["chb_chs", "pjl", "asw_10k", "uniform_10k"].filter((g) => GROUPS.includes(g)).forEach((g, k) => forGroup(g, () => {
   label(s, g, 0.6 + k * 3.05, 1.25, 2.9);
   fig(s, "kin_pheno_cov/fit_coefficients.png", 0.6 + k * 3.05, 1.55, 2.9, 5.3, "", { r: 0.515, b: 0.535 });
-})); else fig(s, "@grm_wg/height_fits.png", 0.6, 1.25, 12.1, 5.6, "");
-foot(s, "slope = ĥ²; 95% delete-block jackknife CIs; lwk and yri left out (too few pairs)");
+})); else if (D.exists("@grm_wg/height_slopes.png")) fig(s, "@grm_wg/height_slopes.png", 0.6, 1.25, 12.1, 5.6, "");
+else { fig(s, "@grm_wg/height_fits.png", 1.6, 1.2, 10.1, 5.4, "", { r: 0.475, b: 0.08 });   // older figure: slope panel only
+  s.addText([{ text: "● GRM", options: { color: "E69F00", bold: true } }, { text: "    ▲ Weir-Goudet", options: { color: "009E73", bold: true } }, { text: "    filled: all pairs, open: relatedness < 0.1", options: { color: "444444" } }],
+            { x: 0.6, y: 6.55, w: 12.1, h: 0.4, fontSize: 14, align: "center", isTextBox: true }); }
+foot(s, "slope of y_i y_j on relatedness = ĥ²; 95% delete-block jackknife CIs; lwk and yri left out (too few pairs)");
 
 section("Appendix", "");
 for (const g of GROUPS.filter((g) => !KEY.includes(g))) forGroup(g, () => {

@@ -41,15 +41,14 @@ def legend(fig, extra=()):
 
 
 # 1. mean relatedness against PC distance
-fig, axes = grid(len(groups))
-for ax, g in zip(axes, groups):
+pgs = [g for g in groups if table(g, "weir_goudet", "relatedness_vs_pc_distance.tsv") is not None]
+fig, axes = grid(len(pgs))
+for ax, g in zip(axes, pgs):
     t = table(g, "weir_goudet", "relatedness_vs_pc_distance.tsv")
-    if t is None: ax.set_visible(False); continue
     for e in COL:
         d = t[t["estimator"] == e]
         ax.plot(d["pc_distance"], d["mean_rel"], marker=MK[e], ms=4, lw=1.8, color=COL[e])
     ax.axhline(0, color="k", lw=0.6); ax.set_title(g, fontweight="bold")
-for ax in list(axes)[:len(groups)]:
     ax.set_xlabel("PC distance"); ax.set_ylabel("mean relatedness")
 fig.tight_layout(rect=(0, 0.05, 1, 1)); legend(fig)
 fig.savefig(f"{OUT}/relatedness_vs_pc_distance.png"); plt.close(fig)
@@ -89,8 +88,8 @@ for g in groups:
     rows.append(r.assign(run=g))
 if rows:
     t = pd.concat(rows); gs = list(dict.fromkeys(t["run"])); y = np.arange(len(gs))[::-1]
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7.4), sharey=True)
-    for ax, (v, lab) in zip(axes, [("slope", "slope = ${\\hat{h}}^{2}$"), ("intercept", "intercept")]):
+    fig, axes = plt.subplots(1, 1, figsize=(12, 7.4), squeeze=False); axes = axes[0]
+    for ax, (v, lab) in zip(axes, [("slope", "slope = ${\\hat{h}}^{2}$")]):
         for yy in y[::2]: ax.axhspan(yy - 0.5, yy + 0.5, color="0.95", zorder=0)
         for k, e in enumerate(COL):
             for scope, fill, off in [("all pairs", True, -0.15), (t["pairs"][~t["pairs"].eq("all pairs")].iloc[0] if (~t["pairs"].eq("all pairs")).any() else None, False, 0.15)]:
@@ -104,6 +103,6 @@ if rows:
     fig.tight_layout(rect=(0, 0.07, 1, 1))
     legend(fig, [plt.Line2D([], [], color="0.4", marker="o", ls="", label="all pairs"),
                  plt.Line2D([], [], color="0.4", marker="o", mfc="white", ls="", label="relatedness < 0.1")])
-    fig.savefig(f"{OUT}/height_fits.png"); plt.close(fig)
+    fig.savefig(f"{OUT}/height_slopes.png"); plt.close(fig)
 
 print("wrote", OUT, sorted(os.listdir(OUT)))
