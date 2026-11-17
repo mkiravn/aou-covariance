@@ -18,8 +18,10 @@ plt.rcParams.update({"font.size": 13, "axes.spines.top": False, "axes.spines.rig
 
 
 def table(g, stage, name):
-    f = os.path.join(FIG, g, stage, name)
-    return pd.read_csv(f, sep="\t") if os.path.exists(f) else None
+    for st in ([stage, "height_quick"] if name == "binned_covariance.tsv" else [stage]):   # quick height bins if kin_pheno_cov has none
+        f = os.path.join(FIG, g, st, name)
+        if os.path.exists(f): return pd.read_csv(f, sep="\t")
+    return None
 
 
 groups = [g for g in ORDER if os.path.isdir(os.path.join(FIG, g, "weir_goudet"))] + \
