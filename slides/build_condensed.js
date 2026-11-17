@@ -43,8 +43,7 @@ s.addTable([[hd("group"), hd("how"), hd("round 1"), hd("round 2")], ...rows],
            { x: 0.6, y: 1.4, w: 7.6, colW: [1.7, 3.5, 1.2, 1.2], fontSize: 14, color: C.text1, border: { type: "solid", pt: 0.5, color: "C9D4DF" }, rowH: 0.5, valign: "middle" });
 s.addText("of 535,662 AoU participants with srWGS", { x: 0.6, y: 6.0, w: 7.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 bullets(s, ["round 1: ellipsoid on AoU's PCs 1-5 around the 1000G superpopulation (99% of its founders)",
-            "round 2: PCA on that superpopulation's 1000G founders, cohort projected (OADP), robust Mahalanobis gate on PCs 1-4 around the target population(s)",
-            "mixed sets (uniform_10k, even_10k) skip the gates: they show what structure does to each estimator"], 8.6, 1.4, 4.1, 5.2, 15);
+            "round 2: PCA on that superpopulation's 1000G founders, cohort projected (OADP), robust Mahalanobis gate on PCs 1-4 around the target population(s)"], 8.6, 1.4, 4.1, 5.2, 15);
 
 s = content("Round-2 gates: N per 1000G population, and overlap");
 fig(s, "pop_gates/kept_by_population.png", 0.6, 1.3, 12.1, 3.0, "AoU people inside each 1000G population's gate");
