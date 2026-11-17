@@ -24,10 +24,10 @@ s.addText("Question: how well does each relatedness measure track phenotypic cov
 section("Samples", "ancestry filtering, groups, SNP panel");
 s = content("Round 1: AoU's PCs");
 bullets(s, ["AoU's premade 16 PCs (ancestry predictions), 1000G projected on the same PCs",
-            "gate: ellipsoid on PCs 1-5 around the 1000G superpopulation (e.g. EAS)",
+            "filter: ellipsoid on PCs 1-5 around the 1000G superpopulation (e.g. EAS)",
             "radius: 99% quantile of the reference founders' distances",
             "keeps the broad continental group, still structured inside"], 0.6, 1.5, 5.6, 5.0, 17);
-fig(s, "ancestry_round1/gate_pcs.png", 6.5, 1.4, 6.2, 5.4, "gate on AoU PCs (" + EX + ")");
+fig(s, "ancestry_round1/gate_pcs.png", 6.5, 1.4, 6.2, 5.4, "filter on AoU PCs (" + EX + ")");
 
 s = content("Round 2: PCA on 1000G, cohort projected");
 cite(s, "Privé et al. 2018 Bioinformatics (bigsnpr); Privé et al. 2020 Bioinformatics (OADP projection); Rousseeuw & Van Driessen 1999 Technometrics (MCD)");
@@ -35,7 +35,7 @@ bullets(s, ["PCA (bigsnpr bed_autoSVD) on 1000G founders of the superpopulation,
             "clumped at r² 0.2, long-range LD regions removed",
             "round-1 set projected with OADP (bed_projectPCA)",
             "changed from plink2 --score: with ~500 training samples, simple projection shrinks PCs toward 0 past PC4",
-            "gate: robust (MCD) Mahalanobis distance on PCs 1-4 around the target 1000G population(s), radius √χ²₄(0.999)"], 0.6, 1.5, 5.6, 5.2, 17);
+            "filter: robust (MCD) Mahalanobis distance on PCs 1-4 around the target 1000G population(s), radius √χ²₄(0.999)"], 0.6, 1.5, 5.6, 5.2, 17);
 fig(s, "round2_pca/cohort_on_reference.png", 6.5, 1.4, 6.2, 2.6, "cohort on the 1000G PCs (" + EX + ")");
 fig(s, "ancestry_round2/gate_pcs.png", 6.5, 4.2, 6.2, 2.6, "kept vs dropped (" + EX + ")");
 
@@ -45,22 +45,22 @@ fig(s, "round2_pca/simple_vs_oadp.png", 4.75, 1.4, 4.0, 2.6, "simple vs OADP pro
 fig(s, "round2_pca/reference_scores.png", 8.9, 1.4, 3.8, 2.6, "1000G reference");
 fig(s, "round2_pca/loadings.png", 0.6, 4.2, 12.1, 2.6, "|loadings| along the genome: no peaks");
 
-s = content("Why OADP: kept by the round-2 gate");
+s = content("Why OADP: kept by the round-2 filter");
 const pr = [["chb_chs", "5,646", "4,211"], ["yri", "553", "151"], ["lwk", "71", "0"], ["stu_itu_beb", "1,746", "2,115"], ["pjl", "3,902", "4,804"], ["asw", "90,160", "92,181"]];
 s.addTable([[hd("group"), hd("OADP"), hd("simple projection")], ...pr],
            { x: 0.6, y: 1.5, w: 6.0, colW: [2.2, 1.6, 2.2], fontSize: 16, color: C.text1, border: { type: "solid", pt: 0.5, color: "C9D4DF" }, rowH: 0.5, valign: "middle" });
-bullets(s, ["simple projection shrinks PCs toward 0", "a gate around a 1000G population then keeps the wrong people: too few for YRI/LWK, too many for SAS"], 7.0, 1.5, 5.7, 3.0, 17);
+bullets(s, ["simple projection shrinks PCs toward 0", "a filter around a 1000G population then keeps the wrong people: too few for YRI/LWK, too many for SAS"], 7.0, 1.5, 5.7, 3.0, 17);
 fig(s, "round2_pca/simple_vs_oadp.png", 7.0, 4.0, 5.7, 2.7, "simple vs OADP projection");
 
-s = content("How many people each gate keeps");
-fig(s, "ancestry_round1/kept_vs_coverage.png", 0.6, 1.4, 4.0, 5.3, "round 1: kept vs gate coverage; plateau = cluster");
-fig(s, "pop_gates/kept_by_population.png", 4.75, 1.4, 4.6, 5.3, "round 2: AoU people inside each 1000G population's gate");
-fig(s, "pop_gates/overlap_EAS.png", 9.5, 1.4, 3.2, 5.3, "gate overlap (Jaccard), one per superpopulation");
+s = content("How many people each filter keeps");
+fig(s, "ancestry_round1/kept_vs_coverage.png", 0.6, 1.4, 4.0, 5.3, "round 1: kept vs filter coverage; plateau = cluster");
+fig(s, "pop_gates/kept_by_population.png", 4.75, 1.4, 4.6, 5.3, "round 2: AoU people inside each 1000G population's filter");
+fig(s, "pop_gates/overlap_EAS.png", 9.5, 1.4, 3.2, 5.3, "filter overlap (Jaccard), one per superpopulation");
 
 s = content("The groups");
-const rows = [["chb_chs", "EAS gate, then CHB+CHS", "11,313", "5,646"], ["yri", "AFR gate, then YRI", "97,335", "553"],
-              ["lwk", "AFR gate, then LWK", "97,335", "71"], ["stu_itu_beb", "SAS gate, then STU+ITU+BEB", "5,145", "1,746"],
-              ["pjl", "SAS gate, then PJL", "5,145", "3,902"], ["asw_10k", "10k of the ASW gate (90,160)", "97,335", "10,000"],
+const rows = [["chb_chs", "EAS filter, then CHB+CHS", "11,313", "5,646"], ["yri", "AFR filter, then YRI", "97,335", "553"],
+              ["lwk", "AFR filter, then LWK", "97,335", "71"], ["stu_itu_beb", "SAS filter, then STU+ITU+BEB", "5,145", "1,746"],
+              ["pjl", "SAS filter, then PJL", "5,145", "3,902"], ["asw_10k", "10k of the ASW filter (90,160)", "97,335", "10,000"],
               ["uniform_10k", "random 10k of all AoU", "—", "10,000"], ["even_10k", "10k spread evenly over AoU PCs 1-4", "—", "10,000"]];
 s.addTable([[hd("group"), hd("how"), hd("after round 1"), hd("after round 2")], ...rows],
            { x: 0.6, y: 1.5, w: 8.4, colW: [1.8, 3.8, 1.4, 1.4], fontSize: 15, color: C.text1, border: { type: "solid", pt: 0.5, color: "C9D4DF" }, rowH: 0.52, valign: "middle" });
@@ -68,7 +68,7 @@ s.addText("of 535,662 AoU participants with srWGS", { x: 0.6, y: 6.35, w: 8.4, h
 card(s, 9.4, 1.5, 3.3, 4.66, "mixed sets", "uniform_10k and even_10k mix ancestries on purpose: they show what structure does to each estimator");
 
 s = content("QC");
-card(s, 0.6, 1.4, 5.8, 2.6, "samples", "AoU srWGS callset (AoU's own sample QC); ancestry gates in rounds 1 and 2; relatives kept throughout");
+card(s, 0.6, 1.4, 5.8, 2.6, "samples", "AoU srWGS callset (AoU's own sample QC); ancestry filters in rounds 1 and 2; relatives kept throughout");
 card(s, 0.6, 4.1, 5.8, 2.6, "variants (GRM panel)", "HapMap3 autosomal SNPs; missingness ≤ 5%; MAF ≥ 1%; HWE p ≥ 1e-6 in single-ancestry groups, none in mixed sets; QC'd within each group");
 card(s, 6.9, 1.4, 5.8, 2.6, "for PCA only", "long-range LD regions removed; clumped (r² 0.2 on 1000G, r² 0.1 within groups); autoSVD drops SNPs with loading peaks");
 fig(s, "grm_panel/variants_by_step.png", 6.9, 4.1, 5.8, 2.6, "variants left after each QC step (" + EX + ")");

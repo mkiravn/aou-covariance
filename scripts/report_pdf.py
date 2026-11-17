@@ -250,7 +250,7 @@ def main():
     if FIGDIR:
         import glob, shutil
         for run in a.runs + [r for r in a.borrow.split(",") if r and r not in a.runs]:   # <figdir>/<run>/<stage>/<figure>.png, report figures only
-            for f in glob.glob(f"{load_run(run).path('report')}/*/*.png"):
+            for f in glob.glob(f"{load_run(run).path('report')}/*/*.png") + glob.glob(f"{load_run(run).path('report')}/*/*.tsv"):   # report tables are already masked
                 out = f"{FIGDIR}/{run}/{os.path.basename(os.path.dirname(f))}/{os.path.basename(f)}"
                 os.makedirs(os.path.dirname(out), exist_ok=True); shutil.copyfile(f, out)
         print("wrote", shutil.make_archive(FIGDIR, "zip", FIGDIR))

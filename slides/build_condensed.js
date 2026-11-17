@@ -37,33 +37,33 @@ s.addText("Relatedness and phenotypic covariance across AoU ancestry groups", { 
 s.addText("GRM, PC-Relate and Weir-Goudet · 8 groups · 7 traits", { placeholder: "body" });
 
 s = content("Groups");
-const rows = [["chb_chs", "EAS gate, then CHB+CHS", "11,313", "5,646"], ["yri", "AFR gate, then YRI", "97,335", "553"],
-              ["lwk", "AFR gate, then LWK", "97,335", "71"], ["stu_itu_beb", "SAS gate, then STU+ITU+BEB", "5,145", "1,746"],
-              ["pjl", "SAS gate, then PJL", "5,145", "3,902"], ["asw_10k", "10k of the ASW gate (90,160)", "97,335", "10,000"],
+const rows = [["chb_chs", "EAS filter, then CHB+CHS", "11,313", "5,646"], ["yri", "AFR filter, then YRI", "97,335", "553"],
+              ["lwk", "AFR filter, then LWK", "97,335", "71"], ["stu_itu_beb", "SAS filter, then STU+ITU+BEB", "5,145", "1,746"],
+              ["pjl", "SAS filter, then PJL", "5,145", "3,902"], ["asw_10k", "10k of the ASW filter (90,160)", "97,335", "10,000"],
               ["uniform_10k", "random 10k of all AoU", "—", "10,000"], ["even_10k", "10k spread evenly over AoU PCs 1-4", "—", "10,000"]];
 s.addTable([[hd("group"), hd("how"), hd("round 1"), hd("round 2")], ...rows],
            { x: 0.6, y: 1.4, w: 7.6, colW: [1.7, 3.5, 1.2, 1.2], fontSize: 14, color: C.text1, border: { type: "solid", pt: 0.5, color: "C9D4DF" }, rowH: 0.5, valign: "middle" });
 s.addText("of 535,662 AoU participants with srWGS", { x: 0.6, y: 6.0, w: 7.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 bullets(s, ["round 1: ellipsoid on AoU's PCs 1-5 around the 1000G superpopulation (99% of its founders)",
-            "round 2: PCA on that superpopulation's 1000G founders, cohort projected (OADP), robust Mahalanobis gate on PCs 1-4 around the target population(s)"], 8.6, 1.4, 4.1, 5.2, 15);
+            "round 2: PCA on that superpopulation's 1000G founders, cohort projected (OADP), robust Mahalanobis filter on PCs 1-4 around the target population(s)"], 8.6, 1.4, 4.1, 5.2, 15);
 
-s = content("Round-2 gates: N per 1000G population, and overlap");
-fig(s, "pop_gates/kept_by_population.png", 0.6, 1.3, 12.1, 3.0, "AoU people inside each 1000G population's gate");
-["EAS", "AFR", "SAS"].forEach((sp, k) => fig(s, `pop_gates/overlap_${sp}.png`, 0.6 + k * 4.1, 4.4, 3.9, 2.5, `${sp}: gate overlap (Jaccard)`));
-s.addText("same gate as round 2 (MCD on each population's founders, PCs 1-4, q = 0.999); gates overlap, so rows don't add up; bars under 21 not drawn",
+s = content("Round-2 filters: N per 1000G population, and overlap");
+fig(s, "pop_gates/kept_by_population.png", 0.6, 1.3, 12.1, 3.0, "AoU people inside each 1000G population's filter");
+["EAS", "AFR", "SAS"].forEach((sp, k) => fig(s, `pop_gates/overlap_${sp}.png`, 0.6 + k * 4.1, 4.4, 3.9, 2.5, `${sp}: filter overlap (Jaccard)`));
+s.addText("same filter as round 2 (MCD on each population's founders, PCs 1-4, q = 0.999); filters overlap, so rows don't add up; bars under 21 not drawn",
           { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 
 tiles("Structure in each sample", [["ancestry_round2/gate_pcs.png", { r: 0.5 }], ["round2_pca/cohort_on_reference.png", { r: 0.5 }], ["@asw/ancestry_round2/gate_pcs.png", { r: 0.5 }]],
-      "each sample on round-2 PCs 1-2 against 1000G (gated groups: kept vs dropped; mixed sets: whole sample; asw_10k: the full ASW gate it was sampled from); cells with 21+ people");
+      "each sample on round-2 PCs 1-2 against 1000G (filtered groups: kept vs dropped; mixed sets: whole sample; asw_10k: the full ASW filter it was sampled from); cells with 21+ people");
 
 s = content("Ancestry PCA");
 bullets(s, ["bigsnpr bed_autoSVD on 1000G founders, 10 PCs; clumped r² 0.2, long-range LD removed",
             "cohort projected with OADP (bed_projectPCA)",
             "covariate PCs within each group: fit on unrelated (AoU kinship > 0.1 pairs out), relatives projected back",
             "used in: PCs 1-10 as covariates for the phenotypes; PCs 1-4 for PC-Relate; round-2 PCs 1-4 for PC distance"], 0.6, 1.4, 5.0, 5.3, 15);
-label(s, `${EX}: cohort on the 1000G PCs (top), round-2 gate (bottom)`, 5.9, 1.3, 6.8);
+label(s, `${EX}: cohort on the 1000G PCs (top), round-2 filter (bottom)`, 5.9, 1.3, 6.8);
 fig(s, "round2_pca/cohort_on_reference.png", 5.9, 1.65, 6.8, 2.55, "cohort on the 1000G PCs");
-fig(s, "ancestry_round2/gate_pcs.png", 5.9, 4.25, 6.8, 2.55, "round-2 gate: kept vs dropped");
+fig(s, "ancestry_round2/gate_pcs.png", 5.9, 4.25, 6.8, 2.55, "round-2 filter: kept vs dropped");
 cite(s, "Privé et al. 2018, 2020 Bioinformatics (bigsnpr, OADP); Rousseeuw & Van Driessen 1999 (MCD)");
 
 s = content("QC and HWE");
