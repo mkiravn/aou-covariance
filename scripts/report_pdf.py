@@ -147,6 +147,21 @@ def meta_variance(pdf, v, col):
     fig.legend(hd, lb, loc="lower center", ncol=min(len(lb), 8), fontsize=8, frameon=False, bbox_to_anchor=(0.5, 0.06))
     save(pdf, fig, "All groups: heterozygote deficit F by allele frequency", "GRM panel SNPs in MAF bins (21+ SNPs); 95% CI across SNPs. F = variance / 2p(1-p) - 1; single-ancestry panels are HWE-filtered.", name="f_by_maf")
 
+def meta_sd_cor(pdf, v, col):
+    runs = list(dict.fromkeys(v["run"])); y = np.arange(len(runs))[::-1]; g = v.set_index("run").reindex(runs)
+    fig, ax = plt.subplots(figsize=(11, 8.5))
+    fig.subplots_adjust(top=0.9, bottom=0.12, left=0.16, right=0.95)
+    for yy in y[::2]:
+        ax.axhspan(yy - 0.5, yy + 0.5, color="0.94", zorder=0)
+    ax.scatter(g["r_sd"], y, s=90, color=[col[r] for r in runs], edgecolor="k", lw=0.5, zorder=3)
+    for yy, r in zip(y, g["r_sd"]):
+        ax.annotate(f"{r:.4f}", (r, yy), xytext=(8, 0), textcoords="offset points", va="center", fontsize=10)
+    ax.set_yticks(y, runs); ax.set_ylim(-0.6, len(runs) - 0.4)
+    ax.set(xlim=(min(g["r_sd"].min(), 0.99) - 0.002, 1.0005), xlabel="correlation across SNPs: observed genotype SD vs sqrt(2p(1-p))")
+    ax.spines[["top", "right"]].set_visible(False); ax.grid(axis="x", alpha=0.4)
+    save(pdf, fig, "All groups: genotype SD against its HWE expectation", "GRM panel SNPs; one correlation per group.", name="sd_correlation")
+
+
 def meta_coef(pdf, t, col, scope):
     t = t[(t["pairs"] == scope) & ~t["run"].isin(FIT_EXCLUDE)]   # tiny groups: r2 dominated by its ~1/N_pairs bias, CIs off the axis
     if t.empty: return
@@ -190,6 +205,8 @@ def meta_pages(pdf, cfgs):
     if r is not None: meta_rank(pdf, r, col)
     v = read_tables(cfgs, "allele_variance", "by_maf.tsv")
     if v is not None: meta_variance(pdf, v, col)
+    sc = read_tables(cfgs, "allele_variance", "sd_correlation.tsv")
+    if sc is not None: meta_sd_cor(pdf, sc, col)
     t = read_tables(cfgs, "kin_pheno_cov", "estimates.tsv")
     if t is not None:
         t = t[(t["transform"] == "raw") & (t["covset"] == "base_pcs")] if "base_pcs" in set(t["covset"]) else t

@@ -70,8 +70,8 @@ bullets(s, ["HapMap3 autosomal SNPs, QC'd within each group",
             "missingness ≤ 5%, MAF ≥ 1%",
             "HWE p ≥ 1e-6 in single-ancestry groups; none in mixed sets",
             "same SNP panel for all three estimators",
-            "F = 1 − H_obs / 2p(1−p): ~0 in homogeneous groups, > 0 in mixed sets (Wahlund)"], 0.6, 1.4, 4.6, 5.3, 16);
-fig(s, "meta/f_by_maf.png", 5.4, 1.3, 7.3, 5.5, "all groups: F by MAF bin");
+            "observed genotype SD against its HWE expectation √(2p(1−p)), across SNPs"], 0.6, 1.4, 4.6, 5.3, 16);
+fig(s, "meta/sd_correlation.png", 5.4, 1.3, 7.3, 5.5, "all groups: correlation of SD with √(2p(1−p))");
 
 s = content("Three relatedness estimators");
 {
@@ -95,8 +95,7 @@ s = content("Three relatedness estimators");
 }
 
 s = content("Distributions");
-fig(s, "meta/relatedness_distributions.png", 0.6, 1.3, 7.4, 5.6, "all groups: bulk (top), relatives (bottom, log)");
-fig(s, "meta/relatedness_spread.png", 8.2, 1.3, 4.5, 5.6, "SD and share > 0.1");
+fig(s, "meta/relatedness_distributions.png", 0.6, 1.25, 12.1, 5.7, "all groups: bulk (top), relatives (bottom, log)");
 
 const PER = 2;   // the three biplots, two groups per slide, full width: bulk, then the full range
 for (const [part, crop, note] of [["", { t: 0.02, b: 0.5 }, "bulk (−0.07 to 0.12)"], [", full range", { t: 0.525 }, "full range (−0.1 to 0.6)"]]) {
