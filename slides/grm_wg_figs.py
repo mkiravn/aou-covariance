@@ -54,6 +54,9 @@ fig.savefig(f"{OUT}/relatedness_vs_pc_distance.png"); plt.close(fig)
 
 # 2. height: mean y_i y_j against relatedness, to 0.1
 for name, xmax, ylim in [("covariance_bulk", 0.1, (-0.04, 0.06)), ("covariance_full", 0.6, None)]:
+    if not any(table(g, "kin_pheno_cov", "binned_covariance.tsv") is not None for g in groups):   # needs the kin_pheno_cov rerun
+        if os.path.exists(f"{OUT}/{name}.png"): os.remove(f"{OUT}/{name}.png")
+        continue
     fig, axes = grid(len(groups))
     for ax, g in zip(axes, groups):
         b = table(g, "kin_pheno_cov", "binned_covariance.tsv"); est = table(g, "kin_pheno_cov", "estimates.tsv")

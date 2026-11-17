@@ -10,7 +10,8 @@ const KEY = ["chb_chs", "pjl", "asw_10k", "uniform_10k"].filter((g) => GROUPS.in
 const label = (s, t, x, y, w) => s.addText(t, { x, y, w, h: 0.3, fontSize: 14, bold: true, color: "444444", margin: 0, isTextBox: true });
 const foot = (s, t) => s.addText(t, { x: 0.6, y: 6.95, w: 11.6, h: 0.35, fontSize: 12, color: GREY, isTextBox: true });
 const forGroup = (g, cb) => { D.setRun(g); cb(); D.setRun(GROUPS[0]); };
-const PROVISIONAL = !!process.argv[3] && !D.exists("@grm_wg/height_fits.png");   // old bundle: crop the existing figures (they still show PC-Relate)
+const OLD = (f) => !!process.argv[3] && !D.exists(f);   // figure not made yet: crop the existing per-group figures (they still show PC-Relate)
+const PROVISIONAL = OLD("@grm_wg/height_fits.png");
 function tiles(s, file, crop, groups) {
   groups.forEach((g, k) => forGroup(g, () => {
     if (!D.exists(file)) return;
@@ -52,11 +53,11 @@ KEY.forEach((g, k) => forGroup(g, () => {
 foot(s, "left: bulk, right: full range; cells (21+ pairs) by mean PC distance; black: bin means; dotted: y = x; other groups in the appendix");
 
 s = content("Relatedness against PC distance");
-if (PROVISIONAL) tiles(s, "weir_goudet/relatedness_vs_pc_distance.png", { r: 0.5 }, GROUPS); else fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 0.6, 1.25, 12.1, 5.6, "");
+if (OLD("@grm_wg/relatedness_vs_pc_distance.png")) tiles(s, "weir_goudet/relatedness_vs_pc_distance.png", { r: 0.5 }, GROUPS); else fig(s, "@grm_wg/relatedness_vs_pc_distance.png", 0.6, 1.25, 12.1, 5.6, "");
 foot(s, "mean relatedness in 40 equal-count bins of PC distance (Euclidean, round-2 PCs 1-4)");
 
 s = content("Height: covariance against relatedness");
-if (PROVISIONAL) tiles(s, "kin_pheno_cov/binned_covariance_bulk.png", { r: 0.76, b: 0.5 }, GROUPS); else fig(s, "@grm_wg/covariance_bulk.png", 0.6, 1.25, 12.1, 5.6, "");
+if (OLD("@grm_wg/covariance_bulk.png")) tiles(s, "kin_pheno_cov/binned_covariance_bulk.png", { r: 0.76, b: 0.5 }, GROUPS); else fig(s, "@grm_wg/covariance_bulk.png", 0.6, 1.25, 12.1, 5.6, "");
 foot(s, "bin means of y_i y_j (residualised, standardised height) with least-squares fits over all pairs; relatedness to 0.1");
 
 s = content(PROVISIONAL ? "Slopes by trait (height: top row)" : "Height: slope and intercept");
@@ -73,8 +74,8 @@ for (const g of GROUPS.filter((g) => !KEY.includes(g))) forGroup(g, () => {
   else { fig(a, "weir_goudet/estimator_comparison.png", 0.6, 1.3, 6.0, 5.6, "", { l: 0.32, r: 0.38, b: 0.5, t: 0.03 }); fig(a, "weir_goudet/estimator_comparison.png", 6.7, 1.3, 6.0, 5.6, "", { l: 0.32, r: 0.38, t: 0.52 }); }
 });
 s = content("Height: covariance against relatedness, full range");
-if (PROVISIONAL) tiles(s, "kin_pheno_cov/binned_covariance_full.png", { r: 0.76, b: 0.5 }, GROUPS); else fig(s, "@grm_wg/covariance_full.png", 0.6, 1.25, 12.1, 5.6, "");
+if (OLD("@grm_wg/covariance_full.png")) tiles(s, "kin_pheno_cov/binned_covariance_full.png", { r: 0.76, b: 0.5 }, GROUPS); else fig(s, "@grm_wg/covariance_full.png", 0.6, 1.25, 12.1, 5.6, "");
 foot(s, "bin means ± 1.96 SE, relatedness to 0.6");
 
-if (PROVISIONAL) console.log("provisional: built from the old bundle; PC-Relate still appears in the cropped figures");
+for (const f of ["relatedness_vs_pc_distance", "covariance_bulk", "height_fits"]) if (OLD(`@grm_wg/${f}.png`)) console.log(`provisional: no grm_wg/${f}.png, cropped the old figure instead`);
 D.write(OUT);
